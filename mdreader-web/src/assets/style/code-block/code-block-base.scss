@@ -1,0 +1,179 @@
+.wj-preview-theme {
+  --wj-code-block-base-block-margin: 1em 0;
+  --wj-code-block-base-border-radius: var(--wj-preview-code-block-border-radius, 8px);
+  --wj-code-block-base-toolbar-inset-block: 2px;
+  --wj-code-block-base-toolbar-inset-inline: 4px;
+  --wj-code-block-base-toolbar-min-height: 28px;
+  --wj-code-block-base-action-font-size: 12px;
+  --wj-code-block-base-action-height: 16px;
+  --wj-code-block-base-action-line-height: 16px;
+  --wj-code-block-base-action-padding-block: 4px;
+  --wj-code-block-base-action-padding-inline: 8px;
+  --wj-code-block-base-action-transition-duration: 0.18s;
+  --wj-code-block-base-mermaid-border-radius: var(
+    --wj-preview-mermaid-border-radius,
+    var(--wj-code-block-base-border-radius)
+  );
+
+  :where(.pre-container) {
+    position: relative;
+    margin: var(--wj-code-block-base-block-margin);
+    border-radius: var(--wj-code-block-base-border-radius);
+  }
+
+  :where(.pre-container-toolbar) {
+    position: absolute;
+    top: var(--wj-code-block-base-toolbar-inset-block);
+    right: var(--wj-code-block-base-toolbar-inset-inline);
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* 单槽位浮层让语言标记与复制按钮在同一位置重叠切换。 */
+  .pre-container-action-slot {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    overflow: hidden;
+    pointer-events: none;
+    color: var(--wj-code-block-action-color, rgba(255, 255, 255, 0.82));
+    text-overflow: ellipsis;
+    transition: color var(--wj-code-block-base-action-transition-duration) ease;
+
+    &:focus-within {
+      color: var(--wj-code-block-action-focus-color, var(--wj-code-block-action-color, rgba(255, 255, 255, 0.96)));
+    }
+  }
+
+  :where(.pre-container-lang, .pre-container-copy) {
+    line-height: var(--wj-code-block-base-action-line-height);
+    height: var(--wj-code-block-base-action-height);
+    overflow: hidden;
+    font-size: var(--wj-code-block-base-action-font-size);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color var(--wj-code-block-base-action-transition-duration) ease;
+  }
+
+  :where(.pre-container-lang) {
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  :where(.pre-container-copy) {
+    cursor: pointer;
+    display: none;
+    pointer-events: none;
+
+    &:focus-visible {
+      outline: none;
+      color: var(--wj-code-block-action-focus-color, var(--wj-code-block-action-color, rgba(255, 255, 255, 0.96)));
+    }
+  }
+
+  /* hover 与 focus-within 共用同一套显隐切换，避免破坏键盘访问路径。 */
+  :where(.pre-container:hover, .pre-container:focus-within) {
+    :where(.pre-container-lang) {
+      display: none;
+      pointer-events: none;
+    }
+
+    :where(.pre-container-copy) {
+      display: block;
+      pointer-events: auto;
+    }
+  }
+
+  :where(.pre-container pre) {
+    margin: 0;
+    min-width: 0;
+    overflow: auto;
+    border-radius: inherit;
+
+    &::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-track {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar:hover {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-track:hover {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-corner {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border: 2px solid transparent;
+      border-radius: 999px;
+      background-color: var(--wj-code-block-scrollbar-thumb-bg);
+      background-clip: content-box;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+      border: 2px solid transparent;
+      background-color: var(--wj-code-block-scrollbar-thumb-bg-hover);
+    }
+
+    &::-webkit-scrollbar-thumb:active {
+      border: 2px solid transparent;
+      background-color: var(--wj-code-block-scrollbar-thumb-bg-active);
+    }
+  }
+
+  :where(.pre-container pre code.hljs) {
+    &::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-track {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar:hover {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-track:hover {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-corner {
+      background-color: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border: 2px solid transparent;
+      border-radius: 999px;
+      background-color: var(--wj-code-block-scrollbar-thumb-bg);
+      background-clip: content-box;
+    }
+
+    &::-webkit-scrollbar-thumb:hover {
+      border: 2px solid transparent;
+      background-color: var(--wj-code-block-scrollbar-thumb-bg-hover);
+    }
+
+    &::-webkit-scrollbar-thumb:active {
+      border: 2px solid transparent;
+      background-color: var(--wj-code-block-scrollbar-thumb-bg-active);
+    }
+  }
+
+  :where(pre.mermaid, pre.mermaid-cache) {
+    max-width: 100%;
+    overflow: auto;
+    border-radius: var(--wj-code-block-base-mermaid-border-radius);
+  }
+}

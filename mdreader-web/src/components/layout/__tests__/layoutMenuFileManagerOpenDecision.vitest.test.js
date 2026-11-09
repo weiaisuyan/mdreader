@@ -1,0 +1,418 @@
+import { shallowMount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { reactive } from 'vue'
+
+import LayoutMenu from '../LayoutMenu.vue'
+
+const mocked = vi.hoisted(() => ({
+  channelSend: vi.fn(),
+  shortcutKeyHandler: vi.fn(),
+  requestDocumentOpenByDialogAndOpen: vi.fn(),
+  requestDocumentOpenPathByInteraction: vi.fn(),
+  requestRecentClear: vi.fn(),
+  recentFileNotExists: vi.fn(),
+}))
+const translationMap = {
+  'topMenu.file.name': '文件',
+  'topMenu.file.children.openFile': '打开',
+  'topMenu.file.children.recentFiles.name': '最近',
+  'topMenu.file.children.recentFiles.noHistory': '暂无最近历史',
+  'topMenu.file.children.export.exportToFile': '导出到文件',
+  'topMenu.file.children.export.exportToClipboard': '导出到剪切板',
+  'topMenu.view.name': '视图',
+  'shortcutKey.viewSource': '源码模式',
+  'shortcutKey.viewSplit': '双栏模式',
+  'shortcutKey.viewPreview': '预览模式',
+  'topMenu.view.children.enterFullScreen': '进入全屏',
+  'topMenu.view.children.exitFullScreen': '退出全屏',
+  'topMenu.view.children.openSidebar': '打开侧边栏',
+  'topMenu.view.children.closeSidebar': '关闭侧边栏',
+}
+
+const store = reactive({
+  isFullScreen: false,
+  sidebarVisible: true,
+  recentList: [],
+  documentSessionSnapshot: {
+    dirty: false,
+    displayPath: 'D:/docs/current.md',
+    resourceContext: {
+      documentPath: 'D:/docs/current.md',
+    },
+  },
+  config: {
+    language: 'zh-CN',
+    shortcutKeyList: [
+      {
+        id: 'viewSource',
+        keymap: '',
+        enabled: true,
+      },
+      {
+        id: 'viewSplit',
+        keymap: '',
+        enabled: true,
+      },
+      {
+        id: 'viewPreview',
+        keymap: '',
+        enabled: true,
+      },
+      {
+        id: 'toggleFullScreen',
+        keymap: 'F11',
+        enabled: true,
+      },
+      {
+        id: 'toggleFileManagerPanel',
+        keymap: '',
+        enabled: true,
+      },
+    ],
+  },
+  setSidebarVisible: vi.fn(),
+  setViewMode: vi.fn(),
+})
+
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({
+    t: key => translationMap[key] ?? key,
+  }),
+}))
+
+vi.mock('@/stores/counter.js', () => ({
+  useCommonStore: () => store,
+}))
+
+vi.mock('@/util/channel/channelUtil.js', () => ({
+  default: {
+    send: mocked.channelSend,
+  },
+}))
+
+vi.mock('@/util/commonUtil.js', () => ({
+  default: {
+    createId: vi.fn(() => `mock-id-${Math.random()}`),
+    createLabel: (label, shortcuts) => ({
+      children: [label, shortcuts],
+    }),
+    createRecentLabel: (path, name) => ({
+      children: [path, name],
+    }),
+    recentFileNotExists: mocked.recentFileNotExists,
+  },
+}))
+
+vi.mock('@/util/fullScreenActionUtil.js', () => ({
+  default: vi.fn(),
+}))
+
+vi.mock('@/util/shortcutKeyUtil.js', () => ({
+  default: {
+    getWebShortcutKeyHandler: mocked.shortcutKeyHandler,
+  },
+}))
+
+vi.mock('@/util/document-session/documentOpenInteractionService.js', () => ({
+  requestDocumentOpenByDialogAndOpen: mocked.requestDocumentOpenByDialogAndOpen,
+  requestDocumentOpenPathByInteraction: mocked.requestDocumentOpenPathByInteraction,
+}))
+
+vi.mock('@/util/document-session/rendererDocumentCommandUtil.js', () => ({
+  requestRecentClear: mocked.requestRecentClear,
+  isDocumentOpenMissingResult: result => result === false || result?.reason === 'recent-missing' || result?.reason === 'open-target-missing',
+}))
+
+function extractTextFromNode(node) {
+  if (Array.isArray(node)) {
+    return node.map(item => extractTextFromNode(item)).join('')
+  }
+
+  if (typeof node === 'string') {
+    return node
+  }
+
+  if (typeof node === 'number') {
+    return String(node)
+  }
+
+  if (!node || typeof node !== 'object') {
+    return ''
+  }
+
+  return extractTextFromNode(node.children)
+}
+
+function getSetupBinding(wrapper, key) {
+  return wrapper.vm[key] ?? wrapper.vm.$.setupState[key]
+}
+
+function getMenuChildren(wrapper, menuIndex) {
+  const menuList = getSetupBinding(wrapper, 'menuList')
+  return menuList[menuIndex].children
+}
+
+function findMenuItemByLabel(children, matcher) {
+  return children.find((item) => {
+    const labelText = extractTextFromNode(item?.label)
+    if (typeof matcher === 'string') {
+      return labelText.includes(matcher)
+    }
+
+    return matcher(labelText, item)
+  })
+}
+
+describe('layoutMenu 文件管理栏接线', () => {
+  beforeEach(() => {
+    store.isFullScreen = false
+    store.sidebarVisible = true
+    store.recentList = []
+    store.documentSessionSnapshot = {
+      dirty: false,
+      displayPath: 'D:/docs/current.md',
+      resourceContext: {
+        documentPath: 'D:/docs/current.md',
+      },
+    }
+    store.config.language = 'zh-CN'
+    store.config.shortcutKeyList = [
+      {
+        id: 'viewSource',
+        keymap: '',
+        enabled: true,
+      },
+      {
+        id: 'viewSplit',
+        keymap: '',
+        enabled: true,
+      },
+      {
+        id: 'viewPreview',
+        keymap: '',
+        enabled: true,
+      },
+      {
+        id: 'toggleFullScreen',
+        keymap: 'F11',
+        enabled: true,
+      },
+      {
+        id: 'toggleFileManagerPanel',
+        keymap: '',
+        enabled: true,
+      },
+    ]
+    store.setSidebarVisible.mockReset()
+    store.setViewMode.mockReset()
+    store.setSidebarVisible.mockImplementation((visible) => {
+      store.sidebarVisible = visible
+    })
+    mocked.channelSend.mockReset()
+    mocked.shortcutKeyHandler.mockReset()
+    mocked.requestDocumentOpenByDialogAndOpen.mockReset()
+    mocked.requestDocumentOpenByDialogAndOpen.mockResolvedValue({
+      ok: false,
+      reason: 'cancelled',
+      path: null,
+    })
+    mocked.requestDocumentOpenPathByInteraction.mockReset()
+    mocked.requestRecentClear.mockReset()
+    mocked.recentFileNotExists.mockReset()
+  })
+
+  it('最近历史点击应复用统一打开决策，并保留 recent-missing 提示能力', async () => {
+    store.recentList = [{
+      path: 'D:/docs/history.md',
+      name: 'history.md',
+    }]
+    mocked.requestDocumentOpenPathByInteraction.mockResolvedValue({
+      ok: false,
+      reason: 'recent-missing',
+    })
+
+    const wrapper = shallowMount(LayoutMenu, {
+      global: {
+        stubs: {
+          'a-dropdown': true,
+          'a-menu': true,
+        },
+      },
+    })
+
+    const recentMenu = findMenuItemByLabel(getMenuChildren(wrapper, 0), '最近')
+    const recentItem = findMenuItemByLabel(recentMenu.children, 'history.md')
+
+    await recentItem.click()
+
+    expect(mocked.requestDocumentOpenPathByInteraction).toHaveBeenCalledWith('D:/docs/history.md', {
+      entrySource: 'recent',
+      trigger: 'user',
+    })
+    expect(mocked.recentFileNotExists).toHaveBeenCalledWith('D:/docs/history.md')
+  })
+
+  it('最近历史经统一宿主 service 后，控制器返回兼容 false 时仍应触发 recentFileNotExists', async () => {
+    store.recentList = [{
+      path: 'D:/docs/missing.md',
+      name: 'missing.md',
+    }]
+    mocked.requestDocumentOpenPathByInteraction.mockResolvedValue(false)
+
+    const wrapper = shallowMount(LayoutMenu, {
+      global: {
+        stubs: {
+          'a-dropdown': true,
+          'a-menu': true,
+        },
+      },
+    })
+
+    const recentMenu = findMenuItemByLabel(getMenuChildren(wrapper, 0), '最近')
+    const recentItem = findMenuItemByLabel(recentMenu.children, 'missing.md')
+
+    await recentItem.click()
+
+    expect(mocked.requestDocumentOpenPathByInteraction).toHaveBeenCalledWith('D:/docs/missing.md', {
+      entrySource: 'recent',
+      trigger: 'user',
+    })
+    expect(mocked.recentFileNotExists).toHaveBeenCalledWith('D:/docs/missing.md')
+  })
+
+  it('文件菜单“打开”应直接走统一打开交互 service，并保留 menu-open 来源语义', async () => {
+    const wrapper = shallowMount(LayoutMenu, {
+      global: {
+        stubs: {
+          'a-dropdown': true,
+          'a-menu': true,
+        },
+      },
+    })
+
+    const openFileItem = findMenuItemByLabel(getMenuChildren(wrapper, 0), '打开')
+
+    await openFileItem.click()
+
+    expect(mocked.requestDocumentOpenByDialogAndOpen).toHaveBeenCalledWith({
+      entrySource: 'menu-open',
+      trigger: 'user',
+    })
+    expect(mocked.shortcutKeyHandler).not.toHaveBeenCalledWith('openFile', true)
+  })
+
+  it('文件菜单应拆分为导出到文件和导出到剪切板，并发送结构化导出 payload', async () => {
+    const wrapper = shallowMount(LayoutMenu, {
+      global: {
+        stubs: {
+          'a-dropdown': true,
+          'a-menu': true,
+        },
+      },
+    })
+
+    const fileMenuChildren = getMenuChildren(wrapper, 0)
+    const exportToFileItem = findMenuItemByLabel(fileMenuChildren, '导出到文件')
+    const exportToClipboardItem = findMenuItemByLabel(fileMenuChildren, '导出到剪切板')
+
+    expect(exportToFileItem).toBeTruthy()
+    expect(exportToClipboardItem).toBeTruthy()
+    expect(exportToFileItem.children).toHaveLength(3)
+    expect(extractTextFromNode(exportToFileItem.children[0].label)).toBe('PDF')
+    expect(extractTextFromNode(exportToFileItem.children[1].label)).toBe('PNG')
+    expect(extractTextFromNode(exportToFileItem.children[2].label)).toBe('JPEG')
+    expect(exportToClipboardItem.children.map(item => extractTextFromNode(item.label))).toEqual([
+      'PNG',
+      'JPEG',
+    ])
+
+    await exportToClipboardItem.children[0].click()
+
+    expect(mocked.channelSend).toHaveBeenCalledWith({
+      event: 'export-start',
+      data: {
+        type: 'PNG',
+        target: 'clipboard',
+      },
+    })
+  })
+
+  it('文件管理栏开关必须从菜单里移除，只保留顶栏按钮这一处入口', () => {
+    const wrapper = shallowMount(LayoutMenu, {
+      global: {
+        stubs: {
+          'a-dropdown': true,
+          'a-menu': true,
+        },
+      },
+    })
+
+    const menuList = getSetupBinding(wrapper, 'menuList')
+    const allMenuText = menuList.map(item => extractTextFromNode(item.children)).join(' ')
+
+    // 视图菜单整体移除后，侧边栏开关不再有任何菜单入口，避免两处状态各说各话
+    expect(menuList).toHaveLength(2)
+    expect(allMenuText).not.toContain('关闭侧边栏')
+    expect(allMenuText).not.toContain('打开侧边栏')
+    expect(store.setSidebarVisible).not.toHaveBeenCalled()
+  })
+
+  it('文件管理栏快捷键即使配置了也不得以菜单项形式出现在菜单栏', () => {
+    store.config.shortcutKeyList = [
+      {
+        id: 'toggleFullScreen',
+        keymap: 'F11',
+        enabled: true,
+      },
+      {
+        id: 'toggleFileManagerPanel',
+        keymap: 'Ctrl+b',
+        enabled: true,
+      },
+    ]
+
+    const wrapper = shallowMount(LayoutMenu, {
+      global: {
+        stubs: {
+          'a-dropdown': true,
+          'a-menu': true,
+        },
+      },
+    })
+
+    const menuList = getSetupBinding(wrapper, 'menuList')
+    const allMenuText = menuList.map(item => extractTextFromNode(item.children)).join(' ')
+
+    expect(allMenuText).not.toContain('Ctrl+b')
+  })
+
+  it('中英文文案应补齐侧边栏打开与关闭的运行时 key', async () => {
+    const zhCN = (await import('@/i18n/zhCN.js')).default
+    const enUS = (await import('@/i18n/enUS.js')).default
+
+    expect(zhCN.topMenu.view.children.openSidebar).toBe('打开侧边栏')
+    expect(zhCN.topMenu.view.children.closeSidebar).toBe('关闭侧边栏')
+    expect(zhCN.topMenu.file.children.export.exportToFile).toBe('导出到文件')
+    expect(zhCN.topMenu.file.children.export.exportToClipboard).toBe('导出到剪切板')
+    expect(enUS.topMenu.view.children.openSidebar).toBe('Open sidebar')
+    expect(enUS.topMenu.view.children.closeSidebar).toBe('Close sidebar')
+    expect(enUS.topMenu.file.children.export.exportToFile).toBe('Export to File')
+    expect(enUS.topMenu.file.children.export.exportToClipboard).toBe('Export to Clipboard')
+    expect(zhCN.message.onlyMarkdownFilesCanBeOpened).toBe('不支当前文件格式')
+    expect(enUS.message.onlyMarkdownFilesCanBeOpened).toBe('Current file format is not supported.')
+    expect(zhCN.message.fileAlreadyOpenedInOtherWindow).toBe('该文件已在其他窗口打开')
+    expect(enUS.message.fileAlreadyOpenedInOtherWindow).toBe('The file is already open in another window.')
+    expect(zhCN.message.fileAlreadyEditingCurrent).toBe('这个文件已经在当前标签打开了')
+    expect(enUS.message.fileAlreadyEditingCurrent).toBe('This file is already open in the current tab.')
+    expect(zhCN.message.fileManagerOpenModeTitle).toBeTruthy()
+    expect(zhCN.message.fileManagerOpenModeTip).toBeTruthy()
+    expect(zhCN.message.fileManagerOpenInCurrentWindow).toBeTruthy()
+    expect(zhCN.message.fileManagerOpenInNewWindow).toBeTruthy()
+    expect(zhCN.message.fileManagerOpenCurrentWindowFailed).toBeTruthy()
+    expect(enUS.message.fileManagerOpenModeTitle).toBeTruthy()
+    expect(enUS.message.fileManagerOpenModeTip).toBeTruthy()
+    expect(enUS.message.fileManagerOpenInCurrentWindow).toBeTruthy()
+    expect(enUS.message.fileManagerOpenInNewWindow).toBeTruthy()
+    expect(enUS.message.fileManagerOpenCurrentWindowFailed).toBeTruthy()
+  })
+})

@@ -1,0 +1,408 @@
+import { StateEffect, StateField } from '@codemirror/state'
+import { Decoration, EditorView } from '@codemirror/view'
+import { computed, nextTick, ref } from 'vue'
+import { findPreviewElementByLine } from '../../../util/editor/previewLayoutIndexUtil.js'
+
+/**
+ * 编辑区与预览区联动高亮
+ * 通过 CodeMirror 行装饰实现，不影响用户原始选区
+ */
+export function useAssociationHighlight({
+  editorViewRef,
+  previewRef,
+  previewController,
+  associationHighlight,
+  themeRef,
+  previewLayoutIndex,
+}) {
+  const linkedHighlightState = ref(null)
+  let activePreviewHighlightElement = null
+  let cursorHighlightRafId = null
+  let pendingCursorLineNumber = null
+  let pendingCursorHighlightOptions = null
+  let lastSyncedCursorLineNumber = null
+  let lastSyncedHighlightMode = null
+
+  const setLinkedSourceHighlightEffect = StateEffect.define()
+
+  function normalizeCursorHighlightOptions(options = {}) {
+    return {
+      previewOnly: options.previewOnly === true,
+    }
+  }
+
+  function mergeCursorHighlightOptions(previousOptions, nextOptions) {
+    const normalizedPreviousOptions = normalizeCursorHighlightOptions(previousOptions)
+    const normalizedNextOptions = normalizeCursorHighlightOptions(nextOptions)
+
+    return {
+      // 只要任一方需要完整高亮，就以后者中的“完整模式”为准。
+      previewOnly: normalizedPreviousOptions.previewOnly === true
+        && normalizedNextOptions.previewOnly === true,
+    }
+  }
+
+  function createRafTask(callback) {
+    if (typeof requestAnimationFrame === 'function') {
+      return requestAnimationFrame(callback)
+    }
+    return setTimeout(callback, 16)
+  }
+
+  function cancelRafTask(id) {
+    if (typeof cancelAnimationFrame === 'function' && typeof requestAnimationFrame === 'function') {
+      cancelAnimationFrame(id)
+      return
+    }
+    clearTimeout(id)
+  }
+
+  function cancelScheduledCursorHighlight() {
+    if (cursorHighlightRafId !== null) {
+      cancelRafTask(cursorHighlightRafId)
+      cursorHighlightRafId = null
+    }
+    pendingCursorLineNumber = null
+    pendingCursorHighlightOptions = null
+  }
+
+  function isSameLineRange(rangeA, rangeB) {
+    if (!rangeA && !rangeB) {
+      return true
+    }
+    if (!rangeA || !rangeB) {
+      return false
+    }
+    return rangeA.startLine === rangeB.startLine && rangeA.endLine === rangeB.endLine
+  }
+
+  function buildLinkedSourceLineDecorations(doc, lineRange) {
+    if (!lineRange) {
+      return Decoration.none
+    }
+    const startLine = Math.max(1, Math.min(doc.lines, lineRange.startLine))
+    const endLine = Math.max(1, Math.min(doc.lines, lineRange.endLine))
+    const rangeStartLine = Math.min(startLine, endLine)
+    const rangeEndLine = Math.max(startLine, endLine)
+    const decorationList = []
+    for (let lineNumber = rangeStartLine; lineNumber <= rangeEndLine; lineNumber++) {
+      const line = doc.line(lineNumber)
+      let className = 'cm-linked-source-highlight'
+      if (rangeStartLine === rangeEndLine) {
+        className += ' cm-linked-source-highlight-single'
+      } else if (lineNumber === rangeStartLine) {
+        className += ' cm-linked-source-highlight-start'
+      } else if (lineNumber === rangeEndLine) {
+        className += ' cm-linked-source-highlight-end'
+      } else {
+        className += ' cm-linked-source-highlight-middle'
+      }
+      decorationList.push(Decoration.line({ class: className }).range(line.from))
+    }
+    return Decoration.set(decorationList, true)
+  }
+
+  const linkedSourceHighlightField = StateField.define({
+    create: () => {
+      return {
+        lineRange: null,
+        decorations: Decoration.none,
+      }
+    },
+    update: (value, transaction) => {
+      let lineRange = value.lineRange
+      for (const effect of transaction.effects) {
+        if (effect.is(setLinkedSourceHighlightEffect)) {
+          lineRange = effect.value
+        }
+      }
+      if (lineRange && transaction.docChanged) {
+        const maxLine = transaction.state.doc.lines
+        lineRange = {
+          startLine: Math.max(1, Math.min(maxLine, lineRange.startLine)),
+          endLine: Math.max(1, Math.min(maxLine, lineRange.endLine)),
+        }
+      }
+      if (isSameLineRange(lineRange, value.lineRange) && !transaction.docChanged) {
+        return value
+      }
+      return {
+        lineRange,
+        decorations: buildLinkedSourceLineDecorations(transaction.state.doc, lineRange),
+      }
+    },
+    provide: field => EditorView.decorations.from(field, value => value.decorations),
+  })
+
+  function getEditorMaxLineNumber() {
+    const view = editorViewRef.value
+    return view ? Math.max(1, view.state.doc.lines) : 1
+  }
+
+  function normalizeLineNumber(lineNumber) {
+    const maxLine = getEditorMaxLineNumber()
+    const numericLine = Number.parseInt(lineNumber, 10)
+    if (Number.isNaN(numericLine)) {
+      return 1
+    }
+    return Math.max(1, Math.min(maxLine, numericLine))
+  }
+
+  function normalizeLineRange(startLine, endLine) {
+    const normalizedStartLine = normalizeLineNumber(startLine)
+    const normalizedEndLine = normalizeLineNumber(endLine)
+    if (normalizedStartLine <= normalizedEndLine) {
+      return { startLine: normalizedStartLine, endLine: normalizedEndLine }
+    }
+    return { startLine: normalizedEndLine, endLine: normalizedStartLine }
+  }
+
+  function clearPreviewLinkedHighlight() {
+    if (activePreviewHighlightElement) {
+      activePreviewHighlightElement.classList.remove('wj-preview-link-highlight')
+      activePreviewHighlightElement = null
+    }
+  }
+
+  function setEditorLinkedHighlight(lineRange) {
+    const view = editorViewRef.value
+    if (!view) {
+      return
+    }
+    view.dispatch({
+      effects: setLinkedSourceHighlightEffect.of(lineRange),
+    })
+  }
+
+  function clearLinkedHighlightDisplay() {
+    clearPreviewLinkedHighlight()
+    setEditorLinkedHighlight(null)
+  }
+
+  function clearAllLinkedHighlight() {
+    cancelScheduledCursorHighlight()
+    clearLinkedHighlightDisplay()
+    linkedHighlightState.value = null
+    lastSyncedCursorLineNumber = null
+    lastSyncedHighlightMode = null
+  }
+
+  function setPreviewLinkedHighlight(element) {
+    if (!element) {
+      clearPreviewLinkedHighlight()
+      return
+    }
+    if (activePreviewHighlightElement && activePreviewHighlightElement !== element) {
+      activePreviewHighlightElement.classList.remove('wj-preview-link-highlight')
+    }
+    activePreviewHighlightElement = element
+    activePreviewHighlightElement.classList.add('wj-preview-link-highlight')
+  }
+
+  function getLineRangeFromPreviewElement(element) {
+    if (!element) {
+      return null
+    }
+    const startLine = Number.parseInt(element.dataset.lineStart, 10)
+    if (Number.isNaN(startLine)) {
+      return null
+    }
+    const endLine = Number.parseInt(element.dataset.lineEnd, 10)
+    return {
+      startLine,
+      endLine: Number.isNaN(endLine) ? startLine : endLine,
+    }
+  }
+
+  function isPreviewPanelActive() {
+    return previewController.value === true && !!previewRef.value
+  }
+
+  function findPreviewMatchByLine(lineNumber, maxLineNumber) {
+    const result = findPreviewElementByLine({
+      previewLayoutIndex,
+      rootElement: previewRef.value,
+      lineNumber,
+      maxLineNumber,
+    })
+    return {
+      ...result,
+      element: result.entry?.element ?? null,
+    }
+  }
+
+  function syncPreviewLinkedHighlightByLine(lineNumber) {
+    const view = editorViewRef.value
+    if (!view || !isPreviewPanelActive()) {
+      clearLinkedHighlightDisplay()
+      return
+    }
+    const normalizedLineNumber = normalizeLineNumber(lineNumber)
+    const previewElement = findPreviewMatchByLine(normalizedLineNumber, view.state.doc.lines)
+    if (!previewElement.found || !previewElement.element) {
+      clearAllLinkedHighlight()
+      return
+    }
+    const elementStart = +previewElement.element.dataset.lineStart
+    const elementEnd = +previewElement.element.dataset.lineEnd || elementStart
+    if (normalizedLineNumber < elementStart || normalizedLineNumber > elementEnd) {
+      clearAllLinkedHighlight()
+      return
+    }
+    setPreviewLinkedHighlight(previewElement.element)
+  }
+
+  function highlightBothSidesByLineRange(startLine, endLine, preferLine = startLine, options = {}) {
+    const view = editorViewRef.value
+    if (!view || associationHighlight.value !== true) {
+      return
+    }
+    const previewOnly = options.previewOnly === true
+    const normalizedLineRange = normalizeLineRange(startLine, endLine)
+    const normalizedPreferLine = normalizeLineNumber(preferLine)
+    if (!isPreviewPanelActive()) {
+      linkedHighlightState.value = {
+        ...normalizedLineRange,
+        preferLine: normalizedPreferLine,
+      }
+      if (previewOnly !== true) {
+        clearLinkedHighlightDisplay()
+      }
+      return
+    }
+    const previewElement = findPreviewMatchByLine(normalizedPreferLine, view.state.doc.lines)
+    if (!previewElement.found || !previewElement.element) {
+      clearAllLinkedHighlight()
+      return
+    }
+    const elementStart = +previewElement.element.dataset.lineStart
+    const elementEnd = +previewElement.element.dataset.lineEnd || elementStart
+    if (normalizedPreferLine < elementStart || normalizedPreferLine > elementEnd) {
+      clearAllLinkedHighlight()
+      return
+    }
+    const nextLinkedHighlightState = {
+      ...normalizedLineRange,
+      preferLine: normalizedPreferLine,
+    }
+    linkedHighlightState.value = nextLinkedHighlightState
+    if (previewOnly !== true) {
+      setEditorLinkedHighlight(normalizedLineRange)
+    }
+    setPreviewLinkedHighlight(previewElement.element)
+  }
+
+  function highlightByEditorCursor(state, options = {}) {
+    const view = editorViewRef.value
+    if (!view || associationHighlight.value !== true) {
+      return
+    }
+    const currentState = state || view.state
+    const lineNumber = currentState.doc.lineAt(currentState.selection.main.to).number
+    const normalizedOptions = normalizeCursorHighlightOptions(options)
+
+    if (lineNumber === pendingCursorLineNumber) {
+      pendingCursorHighlightOptions = mergeCursorHighlightOptions(pendingCursorHighlightOptions, normalizedOptions)
+      return
+    }
+
+    if (lineNumber === lastSyncedCursorLineNumber) {
+      const canUpgradePreviewOnlyHighlight = lastSyncedHighlightMode === 'preview-only'
+        && normalizedOptions.previewOnly !== true
+      if (canUpgradePreviewOnlyHighlight !== true) {
+        return
+      }
+    }
+
+    pendingCursorLineNumber = lineNumber
+    pendingCursorHighlightOptions = normalizedOptions
+
+    if (cursorHighlightRafId !== null) {
+      return
+    }
+    cursorHighlightRafId = createRafTask(() => {
+      cursorHighlightRafId = null
+      const targetLineNumber = pendingCursorLineNumber
+      const targetOptions = pendingCursorHighlightOptions ?? normalizeCursorHighlightOptions()
+      pendingCursorLineNumber = null
+      pendingCursorHighlightOptions = null
+      if (targetLineNumber === null || targetLineNumber === undefined) {
+        return
+      }
+      const currentView = editorViewRef.value
+      if (!currentView || associationHighlight.value !== true) {
+        return
+      }
+      highlightBothSidesByLineRange(targetLineNumber, targetLineNumber, targetLineNumber, targetOptions)
+      lastSyncedCursorLineNumber = targetLineNumber
+      lastSyncedHighlightMode = targetOptions.previewOnly === true ? 'preview-only' : 'full'
+    })
+  }
+
+  function onPreviewAreaClick(event) {
+    const view = editorViewRef.value
+    if (!previewRef.value || !view || associationHighlight.value !== true) {
+      return
+    }
+    if (!(event.target instanceof Element)) {
+      return
+    }
+    const targetLineElement = event.target.closest('[data-line-start]')
+    if (!(targetLineElement instanceof Element) || !previewRef.value.contains(targetLineElement)) {
+      return
+    }
+    const lineRange = getLineRangeFromPreviewElement(targetLineElement)
+    if (!lineRange) {
+      return
+    }
+    cancelScheduledCursorHighlight()
+    lastSyncedCursorLineNumber = null
+    lastSyncedHighlightMode = null
+    highlightBothSidesByLineRange(lineRange.startLine, lineRange.endLine, lineRange.startLine)
+  }
+
+  function restorePreviewLinkedHighlight() {
+    if (associationHighlight.value !== true) {
+      clearAllLinkedHighlight()
+      return
+    }
+    if (!linkedHighlightState.value) {
+      clearPreviewLinkedHighlight()
+      return
+    }
+    nextTick(() => {
+      if (!linkedHighlightState.value) {
+        return
+      }
+      syncPreviewLinkedHighlightByLine(linkedHighlightState.value.preferLine)
+    })
+  }
+
+  const linkedHighlightThemeStyle = computed(() => {
+    if (themeRef.value === 'dark') {
+      return {
+        '--wj-link-highlight-border': '#69b1ff',
+        '--wj-link-highlight-bg': 'rgba(105, 177, 255, 0.2)',
+        '--wj-link-highlight-width': '2px',
+        '--wj-link-highlight-radius': '6px',
+      }
+    }
+    return {
+      '--wj-link-highlight-border': '#1677ff',
+      '--wj-link-highlight-bg': 'rgba(22, 119, 255, 0.12)',
+      '--wj-link-highlight-width': '2px',
+      '--wj-link-highlight-radius': '6px',
+    }
+  })
+
+  return {
+    linkedSourceHighlightField,
+    linkedHighlightThemeStyle,
+    cancelScheduledCursorHighlight,
+    clearAllLinkedHighlight,
+    clearLinkedHighlightDisplay,
+    highlightByEditorCursor,
+    onPreviewAreaClick,
+    restorePreviewLinkedHighlight,
+  }
+}

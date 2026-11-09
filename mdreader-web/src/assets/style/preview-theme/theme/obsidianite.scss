@@ -1,0 +1,460 @@
+/* ============================================================
+   Obsidianite 预览主题
+   调色板与视觉语言移植自 Obsidian 主题 Obsidianite 2.0.2
+   (c) bennyxguo  https://github.com/bennyxguo/Obsidian-Obsidianite
+   说明：Obsidianite 原主题只有暗色一套，本文件同样只提供暗色配色。
+   ============================================================ */
+
+/* ---------- 1. 变量层：让基础层的公共规则也吃到配色 ---------- */
+.wj-preview-theme.preview-theme-obsidianite {
+  /* 底色 / 文字 */
+  --wj-preview-background-color: #100e17;
+  --wj-preview-background-color-transparent: rgba(16, 14, 23, 0);
+  --wj-preview-text-color: #bebebe;
+  --wj-preview-muted-text-color: #8b8794;
+  --wj-preview-subtle-text-color: #6f6b7a;
+  --wj-preview-text-color-inherit: inherit;
+
+  /* 字体 */
+  --wj-preview-font-family: 'Rubik', 'Glow Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --wj-preview-font-size: 16px;
+  --wj-preview-font-weight: 400;
+  --wj-preview-font-weight-semibold: 600;
+  --wj-preview-line-height: 1.8;
+  --wj-preview-line-height-tight: 1.35;
+  --wj-preview-word-break: break-word;
+  --wj-preview-overflow-wrap: break-word;
+  --wj-preview-root-first-child-margin-top: 0;
+  --wj-preview-root-last-child-margin-bottom: 0;
+
+  /* 标题 */
+  --wj-preview-heading-color: #cbdbe5;
+  --wj-preview-heading-font-weight: 600;
+  --wj-preview-heading-line-height: 1.35;
+  --wj-preview-heading-margin-top: 2em;
+  --wj-preview-heading-margin-bottom: 0.9em;
+  --wj-preview-heading-padding: 0 0 0.5em 0;
+  --wj-preview-heading-text-align: left;
+  --wj-preview-heading-before-display: none;
+  --wj-preview-h1-font-size: 2em;
+  --wj-preview-h2-font-size: 1.55em;
+  --wj-preview-h3-font-size: 1.3em;
+  --wj-preview-h4-font-size: 1.08em;
+  --wj-preview-h5-font-size: 1.02em;
+  --wj-preview-h6-font-size: 0.95em;
+
+  /* 段落 / 列表 */
+  --wj-preview-paragraph-margin: 0 0 1em;
+  --wj-preview-adjacent-paragraph-margin-top: 0;
+  --wj-preview-adjacent-image-margin-top: 1em;
+  --wj-preview-list-margin: 0 0 1em;
+  --wj-preview-list-padding-inline-start: 1.6em;
+  --wj-preview-list-item-margin-bottom: 0.35em;
+  --wj-preview-list-nested-margin-top: 0.35em;
+  --wj-preview-list-nested-margin-bottom: 0.35em;
+  --wj-preview-list-text-color: #bebebe;
+  --wj-preview-unordered-list-style: disc;
+  --wj-preview-ordered-list-item-padding-inline-start: 0;
+
+  /* 链接 */
+  --wj-preview-link-color: #6bcafb;
+  --wj-preview-link-hover-color: #0fb6d6;
+  --wj-preview-link-font-weight: 400;
+  --wj-preview-link-text-decoration: none;
+  --wj-preview-link-hover-text-decoration: none;
+  --wj-preview-link-border-bottom: 1px solid rgba(107, 202, 251, 0.25);
+  --wj-preview-link-hover-border-bottom: 1px solid #0fb6d6;
+  --wj-preview-link-underline-offset: 3px;
+
+  /* 强调 */
+  --wj-preview-strong-color: #87c2fd;
+  --wj-preview-strong-font-weight: 600;
+  --wj-preview-emphasis-color: #bb9af7;
+  --wj-preview-delete-opacity: 0.6;
+  --wj-preview-mark-background-color: rgba(244, 86, 157, 0.25);
+  --wj-preview-mark-text-color: #f7dbe8;
+
+  /* 引用 */
+  --wj-preview-blockquote-margin: 0 0 1.6em;
+  --wj-preview-blockquote-padding: 1em 1.5em 1em 1.75em;
+  --wj-preview-blockquote-text-color: #bdbdbd;
+  --wj-preview-blockquote-background-color: linear-gradient(135deg, rgba(32, 28, 41, 0.55), #100e17);
+  --wj-preview-blockquote-border-color: rgba(14, 210, 247, 0.5);
+  --wj-preview-blockquote-border-width: 3px;
+  --wj-preview-blockquote-border-inline-start: 3px solid rgba(14, 210, 247, 0.5);
+  --wj-preview-blockquote-font-size: inherit;
+  --wj-preview-blockquote-first-child-margin-top: 0;
+  --wj-preview-blockquote-last-child-margin-bottom: 0;
+  --wj-preview-blockquote-paragraph-margin: 0 0 0.6em;
+
+  /* 行内代码 / 代码块 */
+  --wj-preview-inline-code-background-color: rgba(14, 210, 247, 0.1);
+  --wj-preview-inline-code-text-color: #0fb6d6;
+  --wj-preview-inline-code-font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  --wj-preview-inline-code-font-size: 0.88em;
+  --wj-preview-inline-code-font-weight: 400;
+  --wj-preview-inline-code-padding: 0.15em 0.4em;
+  --wj-preview-inline-code-border-radius: 4px;
+  --wj-preview-inline-code-line-height: 1.4;
+  --wj-preview-inline-code-margin: 0 0.15em;
+  --wj-preview-inline-code-display: inline;
+  --wj-preview-inline-code-white-space: normal;
+  --wj-preview-inline-code-word-break: normal;
+  --wj-preview-inline-code-overflow-x: visible;
+  --wj-preview-inline-code-box-decoration-break: clone;
+  --wj-preview-inline-code-copy-cursor: pointer;
+  --wj-preview-code-font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  --wj-preview-code-line-height: 1.55;
+
+  /* 表格 */
+  --wj-preview-table-margin: 0 0 1.4em;
+  --wj-preview-table-display: block;
+  --wj-preview-table-width: max-content;
+  --wj-preview-table-max-width: 100%;
+  --wj-preview-table-overflow-x: auto;
+  --wj-preview-table-border-collapse: collapse;
+  --wj-preview-table-border-color: rgba(14, 210, 247, 0.15);
+  --wj-preview-table-border: 1px solid rgba(14, 210, 247, 0.15);
+  --wj-preview-table-cell-border: 1px solid rgba(14, 210, 247, 0.15);
+  --wj-preview-table-cell-padding: 0.5em 0.9em;
+  --wj-preview-table-cell-line-height: 1.6;
+  --wj-preview-table-cell-min-width: 0;
+  --wj-preview-table-header-background-color: #191621;
+  --wj-preview-table-header-text-color: #cbdbe5;
+  --wj-preview-table-header-font-weight: 600;
+  --wj-preview-table-header-text-align: left;
+  --wj-preview-table-body-background-color: transparent;
+  --wj-preview-table-row-even-background-color: rgba(25, 22, 33, 0.55);
+  --wj-preview-table-row-border-top: 1px solid rgba(14, 210, 247, 0.15);
+  --wj-preview-table-font-size: 0.94em;
+
+  /* 分隔线 */
+  --wj-preview-hr-margin: 2.6em 0;
+  --wj-preview-hr-border: none;
+  --wj-preview-hr-border-top: none;
+  --wj-preview-hr-width: 100%;
+  --wj-preview-hr-color: rgba(14, 210, 247, 0.45);
+
+  /* 图片 / 媒体 */
+  --wj-preview-image-max-width: 100%;
+  --wj-preview-image-height: auto;
+  --wj-preview-image-box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+  --wj-preview-audio-color-scheme: dark;
+
+  /* 任务列表 / 折叠 / 脚注 / 键盘键 */
+  --wj-preview-task-list-style: none;
+  --wj-preview-task-list-padding-inline-start: var(--wj-preview-list-padding-inline-start);
+  --wj-preview-task-checkbox-gap: 0.5em;
+  --wj-preview-task-checkbox-size: 1em;
+  --wj-preview-task-checkbox-margin: 0;
+  --wj-preview-task-checkbox-vertical-align: middle;
+  --wj-preview-task-checkbox-offset-inline-start: 0;
+
+  --wj-preview-details-margin: 0 0 1em;
+  --wj-preview-details-padding: 0.6em 1em;
+  --wj-preview-details-background-color: rgba(25, 22, 33, 0.7);
+  --wj-preview-details-border: 1px solid rgba(14, 210, 247, 0.15);
+  --wj-preview-details-border-color: rgba(14, 210, 247, 0.15);
+  --wj-preview-details-border-radius: 6px;
+  --wj-preview-details-last-child-margin-bottom: 0;
+  --wj-preview-details-open-summary-margin-bottom: 0.6em;
+  --wj-preview-summary-cursor: pointer;
+  --wj-preview-summary-font-weight: 600;
+  --wj-preview-summary-text-color: #0fb6d6;
+
+  --wj-preview-footnote-margin-top: 2em;
+  --wj-preview-footnote-padding-top: 1em;
+  --wj-preview-footnote-border-top: 1px solid rgba(14, 210, 247, 0.18);
+  --wj-preview-footnote-border-color: rgba(14, 210, 247, 0.18);
+  --wj-preview-footnote-font-size: 0.85em;
+  --wj-preview-footnote-link-font-size: 0.75em;
+  --wj-preview-footnote-text-color: #8b8794;
+  --wj-preview-footnote-list-padding-inline-start: 1.4em;
+  --wj-preview-footnote-list-item-margin-bottom: 0.3em;
+
+  --wj-preview-kbd-background-color: #191621;
+  --wj-preview-kbd-text-color: #cbdbe5;
+  --wj-preview-kbd-border: 1px solid rgba(14, 210, 247, 0.25);
+  --wj-preview-kbd-border-radius: 4px;
+  --wj-preview-kbd-box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.5);
+  --wj-preview-kbd-font-size: 0.82em;
+  --wj-preview-kbd-padding: 0.1em 0.4em;
+
+  /* 其它 */
+  --wj-preview-display-block: block;
+  --wj-preview-display-none: none;
+  --wj-preview-size-auto: auto;
+  --wj-preview-space-none: 0;
+  --wj-preview-word-break-normal: normal;
+  --wj-preview-cursor-pointer: pointer;
+  --wj-preview-user-select-none: none;
+
+  /* 根容器 */
+  background: #100e17;
+  color: #bebebe;
+  font-family: var(--wj-preview-font-family);
+  font-size: var(--wj-preview-font-size);
+  line-height: var(--wj-preview-line-height);
+}
+
+.wj-preview-theme.preview-theme-obsidianite .wj-scrollbar {
+  background: transparent;
+}
+
+/* ---------- 2. 标题：h1 青色，h2~h6 粉色渐变下划线 ---------- */
+.wj-preview-theme.preview-theme-obsidianite h1,
+.wj-preview-theme.preview-theme-obsidianite h2,
+.wj-preview-theme.preview-theme-obsidianite h3,
+.wj-preview-theme.preview-theme-obsidianite h4,
+.wj-preview-theme.preview-theme-obsidianite h5,
+.wj-preview-theme.preview-theme-obsidianite h6 {
+  font-family: var(--wj-preview-font-family);
+  font-weight: 600;
+  color: #cbdbe5;
+  margin: 2em 0 0.9em;
+  padding-bottom: 0.45em;
+  line-height: 1.35;
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(to right, #f4569d, #100e17 30%, #100e17) 1;
+}
+
+.wj-preview-theme.preview-theme-obsidianite h1 {
+  font-size: 2em;
+  color: #0fb6d6;
+  letter-spacing: 0.01em;
+  border-image: linear-gradient(to right, #0fb6d6, #100e17 45%, #100e17) 1;
+}
+
+.wj-preview-theme.preview-theme-obsidianite h2 { font-size: 1.55em; }
+.wj-preview-theme.preview-theme-obsidianite h3 { font-size: 1.3em; }
+.wj-preview-theme.preview-theme-obsidianite h4,
+.wj-preview-theme.preview-theme-obsidianite h5,
+.wj-preview-theme.preview-theme-obsidianite h6 { font-size: 1.05em; }
+
+/* ---------- 3. 正文 / 强调 ---------- */
+.wj-preview-theme.preview-theme-obsidianite p {
+  margin: 0 0 1em;
+}
+
+.wj-preview-theme.preview-theme-obsidianite strong {
+  font-weight: 600;
+  color: #87c2fd;
+  background-image: linear-gradient(62deg, #87c2fd 0%, #dcb9fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.wj-preview-theme.preview-theme-obsidianite em {
+  color: #bb9af7;
+  font-style: italic;
+}
+
+.wj-preview-theme.preview-theme-obsidianite a {
+  color: #6bcafb;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(107, 202, 251, 0.25);
+}
+
+.wj-preview-theme.preview-theme-obsidianite a:hover {
+  color: #0fb6d6;
+  border-bottom-color: #0fb6d6;
+}
+
+.wj-preview-theme.preview-theme-obsidianite mark {
+  background: rgba(244, 86, 157, 0.25);
+  color: #f7dbe8;
+  padding: 0 0.15em;
+  border-radius: 2px;
+}
+
+/* ---------- 4. 引用块：青色左边条 + 渐变底 + 上下细光条 ---------- */
+.wj-preview-theme.preview-theme-obsidianite blockquote {
+  position: relative;
+  margin: 0 0 1.6em;
+  padding: 1em 1.5em 1em 1.75em;
+  color: #bdbdbd;
+  border: 0;
+  border-left: 3px solid rgba(14, 210, 247, 0.5);
+  border-radius: 0 5px 5px 0;
+  background: linear-gradient(135deg, rgba(32, 28, 41, 0.55), #100e17);
+}
+
+.wj-preview-theme.preview-theme-obsidianite blockquote::before,
+.wj-preview-theme.preview-theme-obsidianite blockquote::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  height: 2px;
+  pointer-events: none;
+}
+
+.wj-preview-theme.preview-theme-obsidianite blockquote::before {
+  top: 0;
+  width: 60%;
+  background: linear-gradient(90deg, rgba(13, 185, 215, 0.5), #13111a);
+}
+
+.wj-preview-theme.preview-theme-obsidianite blockquote::after {
+  bottom: 0;
+  width: 25%;
+  background: linear-gradient(90deg, rgba(13, 185, 215, 0.5), #15131c);
+}
+
+/* ---------- 5. 代码 ---------- */
+.wj-preview-theme.preview-theme-obsidianite :not(pre) > code {
+  background: rgba(14, 210, 247, 0.1);
+  color: #0fb6d6;
+  padding: 0.15em 0.4em;
+  margin: 0 0.15em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+}
+
+/* 代码块外壳与 hljs token 配色由 code-block-base.scss 与代码主题独占，
+   预览主题只负责行内代码，避免两套样式互相打架。 */
+
+/* ---------- 6. 表格 ---------- */
+.wj-preview-theme.preview-theme-obsidianite table {
+  border-collapse: collapse;
+  margin: 0 0 1.4em;
+  font-size: 0.94em;
+}
+
+.wj-preview-theme.preview-theme-obsidianite th,
+.wj-preview-theme.preview-theme-obsidianite td {
+  border: 1px solid rgba(14, 210, 247, 0.15);
+  padding: 0.5em 0.9em;
+  line-height: 1.6;
+}
+
+.wj-preview-theme.preview-theme-obsidianite th {
+  background: #191621;
+  color: #cbdbe5;
+  font-weight: 600;
+  text-align: left;
+}
+
+.wj-preview-theme.preview-theme-obsidianite tbody tr:nth-child(even) {
+  background: rgba(25, 22, 33, 0.55);
+}
+
+/* ---------- 7. 分隔线 ---------- */
+.wj-preview-theme.preview-theme-obsidianite hr {
+  margin: 2.6em 0;
+  height: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(14, 210, 247, 0.45);
+  border-image: linear-gradient(to right, transparent, #0fb6d6, transparent) 1;
+}
+
+/* ---------- 8. 列表 / 任务框 ---------- */
+.wj-preview-theme.preview-theme-obsidianite ul,
+.wj-preview-theme.preview-theme-obsidianite ol {
+  margin: 0 0 1em;
+  padding-inline-start: 1.6em;
+}
+
+.wj-preview-theme.preview-theme-obsidianite li {
+  margin-bottom: 0.35em;
+}
+
+.wj-preview-theme.preview-theme-obsidianite li::marker {
+  color: #0fb6d6;
+}
+
+/* 任务列表复选框：对齐 Obsidianite（未勾选灰框；勾选青色实心块 + 深色对钩） */
+.wj-preview-theme.preview-theme-obsidianite input.task-list-item-checkbox,
+.wj-preview-theme.preview-theme-obsidianite input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  margin: 0 0.5em 0 0;
+  border: 2px solid #9e9e9e;
+  border-radius: 3px;
+  background: transparent;
+  position: relative;
+  vertical-align: -3px;
+  transition: background-color 0.25s ease, border-color 0.25s ease;
+  cursor: default;
+}
+
+.wj-preview-theme.preview-theme-obsidianite input.task-list-item-checkbox:checked,
+.wj-preview-theme.preview-theme-obsidianite input[type='checkbox']:checked {
+  background-color: #0fb6d6;
+  border-color: #0fb6d6;
+}
+
+.wj-preview-theme.preview-theme-obsidianite input.task-list-item-checkbox:checked::after,
+.wj-preview-theme.preview-theme-obsidianite input[type='checkbox']:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 4px;
+  height: 8px;
+  border-right: 2px solid #100e17;
+  border-bottom: 2px solid #100e17;
+  transform: rotate(45deg);
+  box-sizing: border-box;
+}
+
+/* 已勾选任务项：删除线 + 强调色（Obsidianite 原样式） */
+.wj-preview-theme.preview-theme-obsidianite li:has(> input.task-list-item-checkbox:checked) {
+  color: #0fb6d6;
+  text-decoration: line-through;
+}
+
+/* ---------- 9. 图片 ---------- */
+.wj-preview-theme.preview-theme-obsidianite img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+/* ---------- 10. 折叠块 / 脚注 ---------- */
+.wj-preview-theme.preview-theme-obsidianite details {
+  margin: 0 0 1em;
+  padding: 0.6em 1em;
+  background: rgba(25, 22, 33, 0.7);
+  border: 1px solid rgba(14, 210, 247, 0.15);
+  border-radius: 6px;
+}
+
+.wj-preview-theme.preview-theme-obsidianite summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #0fb6d6;
+}
+
+.wj-preview-theme.preview-theme-obsidianite kbd {
+  background: #191621;
+  color: #cbdbe5;
+  border: 1px solid rgba(14, 210, 247, 0.25);
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+  font-size: 0.82em;
+}
+
+/* ---------- 11. 滚动条 ---------- */
+.wj-preview-theme.preview-theme-obsidianite ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.wj-preview-theme.preview-theme-obsidianite ::-webkit-scrollbar-thumb {
+  background: rgba(14, 210, 247, 0.22);
+  border-radius: 5px;
+}
+
+.wj-preview-theme.preview-theme-obsidianite ::-webkit-scrollbar-thumb:hover {
+  background: rgba(14, 210, 247, 0.4);
+}
+
+.wj-preview-theme.preview-theme-obsidianite ::selection {
+  background: rgba(14, 210, 247, 0.3);
+}

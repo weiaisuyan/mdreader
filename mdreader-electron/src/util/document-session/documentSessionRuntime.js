@@ -1,0 +1,619 @@
+import { createDocumentCommandRunner } from './documentCommandRunner.js'
+
+let activeDocumentSessionRuntime = null
+const REQUIRED_RUNTIME_DEP_KEYS = [
+  'store',
+  'saveCoordinator',
+  'commandService',
+  'effectService',
+  'windowBridge',
+]
+
+function isValidWindowId(windowId) {
+  return (typeof windowId === 'number' && Number.isFinite(windowId))
+    || (typeof windowId === 'string' && windowId.trim() !== '')
+}
+
+function createFallbackDocumentContext(snapshot) {
+  return {
+    path: snapshot?.resourceContext?.documentPath || null,
+    exists: snapshot?.exists === true,
+    content: snapshot?.content || '',
+    saved: snapshot?.saved === true,
+    fileName: snapshot?.fileName || 'Untitled',
+  }
+}
+
+export function normalizeOpenCommandResult({
+  result,
+}) {
+  return result
+}
+
+function getOpenFailureWindowMessage(result) {
+  if (result?.reason === 'open-target-invalid-extension' || result?.reason === 'open-target-not-file') {
+    return {
+      type: 'warning',
+      content: 'message.onlyMarkdownFilesCanBeOpened',
+    }
+  }
+
+  if (result?.reason === 'open-target-read-failed') {
+    return {
+      type: 'error',
+      content: 'message.openMarkdownFileFailed',
+    }
+  }
+
+  return null
+}
+
+export async function openDocumentWindowWithRuntimePolicy({
+  targetPath,
+  trigger = 'user',
+  isRecent = false,
+  sourceWindowId = null,
+  openWindow,
+  getDocumentContext = () => null,
+  getSessionSnapshot = () => null,
+}) {
+  if (typeof openWindow !== 'function') {
+    return {
+      ok: false,
+      reason: 'open-document-window-not-configured',
+      path: targetPath || null,
+      trigger,
+    }
+  }
+
+  const openedWindowId = await openWindow(targetPath, {
+    isRecent,
+    trigger,
+  })
+  if (openedWindowId?.ok === false) {
+    return openedWindowId
+  }
+
+  const normalizedSourceWindowId = isValidWindowId(sourceWindowId)
+    ? sourceWindowId
+    : null
+  const normalizedOpenedWindowId = isValidWindowId(openedWindowId)
+    ? openedWindowId
+    : null
+
+  const snapshot = normalizedOpenedWindowId == null
+    ? null
+    : getSessionSnapshot(normalizedOpenedWindowId)
+  const documentContext = normalizedOpenedWindowId == null
+    ? null
+    : getDocumentContext(normalizedOpenedWindowId)
+
+  return {
+    ok: true,
+    reason: isRecent && normalizedSourceWindowId == null && !documentContext?.path
+      ? 'recent-missing'
+      : 'opened',
+    path: targetPath || null,
+    trigger,
+    snapshot,
+  }
+}
+
+const DOCUMENT_STATE_COMMAND_SET = new Set([
+  'document.edit',
+  'document.save',
+  'document.save-and-close',
+  'document.save-copy',
+  'document.request-close',
+  'document.cancel-close',
+  'document.confirm-force-close',
+  'document.activate-tab',
+  'document.close-tab',
+  'document.close-tabs',
+  'document.move-tab-to-new-window',
+  'document.reorder-tabs',
+  // 多栏并排：标签组维度的四个状态命令。
+  'document.create-group',
+  'document.activate-group',
+  'document.move-tab-to-group',
+  'document.close-group',
+  'document.external.apply',
+  'document.external.ignore',
+])
+
+const RESOURCE_COMMAND_SET = new Set([
+  'document.resource.open-in-folder',
+  'document.resource.copy-absolute-path',
+  'document.resource.copy-link',
+  'document.resource.copy-image',
+  'document.resource.save-as',
+  'document.resource.delete-local',
+  'resource.get-info',
+])
+
+const SYNC_QUERY_SET = new Set([
+  'resource.get-comparable-key',
+])
+
+function assertRequiredRuntimeDeps(deps) {
+  const missingDepList = REQUIRED_RUNTIME_DEP_KEYS.filter((depKey) => {
+    return deps?.[depKey] == null
+  })
+
+  if (missingDepList.length > 0) {
+    throw new Error(`createDocumentSessionRuntime 缺少必要依赖: ${missingDepList.join(', ')}`)
+  }
+}
+
+/**
+ * 创建 document-session 统一运行时。
+ *
+ * 当前 Task 3 先收口三类入口：
+ * - startup / second-instance 的 open-path
+ * - recent 打开与 recent 列表操作
+ * - session snapshot 查询
+ *
+ * 窗口生命周期、BrowserWindow 事件接线仍保留给 Task 5。
+ */
+export function createDocumentSessionRuntime(deps = {}) {
+  assertRequiredRuntimeDeps(deps)
+
+  const store = deps.store
+  const saveCoordinator = deps.saveCoordinator
+  const resourceService = deps.resourceService || null
+  const fileManagerService = deps.fileManagerService || null
+  const directoryWatchService = deps.directoryWatchService || null
+  const commandService = deps.commandService
+  const effectService = deps.effectService
+  const windowBridge = deps.windowBridge
+  const getDocumentContextByWindowId = deps.getDocumentContext || null
+  const resolveOpenExistingTabByPath = deps.resolveOpenExistingTab || null
+  const openDocumentWindow = deps.openDocumentWindow || null
+  const prepareOpenPathInCurrentWindow = deps.prepareOpenPathInCurrentWindow || null
+  const openDocumentInCurrentWindow = deps.openDocumentInCurrentWindow || null
+  const openDocumentTabInWindow = deps.openDocumentTabInWindow || null
+  const getTargetEditorWindowId = deps.getTargetEditorWindowId || (() => null)
+  const publishOpenFailureSystemNotification = deps.publishOpenFailureSystemNotification || (() => null)
+  const buildRunnerEffectContext = deps.buildRunnerEffectContext || (() => ({}))
+  let runtimeApi = null
+  const executeDocumentCommand = deps.executeDocumentCommand || (async ({
+    windowId,
+    command,
+    payload,
+    runtime,
+  }) => {
+    return await runtime.dispatch(windowId, command, payload)
+  })
+  async function executeResourceCommand({
+    windowId,
+    command,
+    payload,
+  }) {
+    if (typeof deps.executeResourceCommand === 'function') {
+      return await deps.executeResourceCommand({
+        windowId,
+        command,
+        payload,
+        runtime: runtimeApi,
+      })
+    }
+
+    if (!resourceService) {
+      throw new Error('document resource service 尚未配置')
+    }
+
+    switch (command) {
+      case 'document.resource.open-in-folder':
+        return await resourceService.openInFolder({
+          windowId,
+          payload,
+        })
+
+      case 'document.resource.copy-absolute-path':
+        return await resourceService.copyAbsolutePath({
+          windowId,
+          payload,
+        })
+
+      case 'document.resource.copy-link':
+        return await resourceService.copyLink({
+          windowId,
+          payload,
+        })
+
+      case 'document.resource.copy-image':
+        return await resourceService.copyImage({
+          windowId,
+          payload,
+        })
+
+      case 'document.resource.save-as':
+        return await resourceService.saveAs({
+          windowId,
+          payload,
+        })
+
+      case 'document.resource.delete-local':
+        return await resourceService.deleteLocal({
+          windowId,
+          payload,
+        })
+
+      case 'resource.get-info':
+        return await resourceService.getInfo({
+          windowId,
+          payload,
+        })
+
+      default:
+        throw new Error(`未知资源命令: ${command}`)
+    }
+  }
+
+  function executeResourceQuery({
+    windowId,
+    command,
+    payload,
+  }) {
+    if (typeof deps.executeResourceQuery === 'function') {
+      return deps.executeResourceQuery({
+        windowId,
+        command,
+        payload,
+        runtime: runtimeApi,
+      })
+    }
+    if (typeof deps.executeSyncQuery === 'function') {
+      return deps.executeSyncQuery({
+        windowId,
+        command,
+        payload,
+        runtime: runtimeApi,
+      })
+    }
+
+    if (!resourceService) {
+      throw new Error('document resource service 尚未配置')
+    }
+
+    if (command === 'resource.get-comparable-key') {
+      return resourceService.getComparableKey({
+        windowId,
+        payload,
+      })
+    }
+
+    throw new Error(`未知同步资源查询: ${command}`)
+  }
+  const commandRunner = deps.commandRunner || createDocumentCommandRunner({
+    commandService,
+    getSessionSnapshot: windowId => getSessionSnapshot(windowId),
+    publishSnapshotChanged: ({ windowId, snapshot }) => {
+      return windowBridge.publishSnapshotChanged?.({
+        windowId,
+        snapshot,
+      })
+    },
+    applyEffect: async ({ effect, dispatchCommand, windowId, ...effectContext }) => {
+      return await effectService.applyEffect?.({
+        effect,
+        dispatchCommand,
+        windowId,
+        ...effectContext,
+      })
+    },
+  })
+
+  function getSessionSnapshot(windowId) {
+    if (!isValidWindowId(windowId)) {
+      return null
+    }
+    return windowBridge.getSessionSnapshot?.(windowId) || null
+  }
+
+  function getDocumentContext(windowId) {
+    if (!isValidWindowId(windowId)) {
+      return null
+    }
+    const documentContext = getDocumentContextByWindowId?.(windowId)
+    if (documentContext) {
+      return documentContext
+    }
+    return createFallbackDocumentContext(getSessionSnapshot(windowId))
+  }
+
+  function publishWindowMessage(windowId, data) {
+    if (!isValidWindowId(windowId) || !data) {
+      return null
+    }
+    return windowBridge.publishMessage?.({
+      windowId,
+      data,
+      snapshot: getSessionSnapshot(windowId),
+    }) || null
+  }
+
+  function publishOpenFailureNotification(windowId, result, payload) {
+    if (result?.ok !== false || result.reason !== 'open-target-read-failed') {
+      return null
+    }
+
+    const targetPath = typeof result.path === 'string'
+      ? result.path
+      : (typeof payload?.path === 'string' ? payload.path : null)
+
+    try {
+      return publishOpenFailureSystemNotification({
+        windowId: isValidWindowId(windowId) ? windowId : null,
+        path: targetPath,
+      }) || null
+    } catch {
+      // 通知失败不能反向打断打开链路的结构化返回。
+      return null
+    }
+  }
+
+  function createUiDispatchCommand(windowId) {
+    return (nextCommand, nextPayload) => {
+      return executeUiCommand(windowId, nextCommand, nextPayload)
+    }
+  }
+
+  async function dispatch(windowId, command, payload, options = {}) {
+    return await commandRunner.run({
+      windowId,
+      // 多标签后，后台会话的事件（例如外部变更）需要定向到自己的会话，
+      // 不能一律打到窗口当前活动会话上。
+      sessionId: options.sessionId || null,
+      command,
+      payload,
+      publishSnapshotMode: options.publishSnapshotChanged || 'always',
+      effectContext: buildRunnerEffectContext({
+        windowId,
+        dispatchCommand: (nextCommand, nextPayload, nextOptions = {}) => {
+          return dispatch(windowId, nextCommand, nextPayload, nextOptions)
+        },
+      }),
+    })
+  }
+
+  function normalizeEffectCommandResult(normalizedWindowId, command, payload, result) {
+    const normalizedResult = normalizeOpenCommandResult({
+      command,
+      result,
+      targetPath: typeof payload?.path === 'string' ? payload.path : null,
+    })
+
+    const windowMessageData = normalizedWindowId != null
+      && normalizedResult?.ok === false
+      ? getOpenFailureWindowMessage(normalizedResult)
+      : null
+    if (windowMessageData) {
+      publishWindowMessage(normalizedWindowId, windowMessageData)
+    }
+    publishOpenFailureNotification(normalizedWindowId, normalizedResult, payload)
+
+    return normalizedResult
+  }
+
+  function executeUiCommand(windowId, command, payload) {
+    const normalizedWindowId = isValidWindowId(windowId) ? windowId : null
+    if (normalizedWindowId != null && DOCUMENT_STATE_COMMAND_SET.has(command)) {
+      return executeDocumentCommand({
+        windowId: normalizedWindowId,
+        command,
+        payload,
+        runtime: runtimeApi,
+      })
+    }
+
+    if (normalizedWindowId != null && RESOURCE_COMMAND_SET.has(command)) {
+      return executeResourceCommand({
+        windowId: normalizedWindowId,
+        command,
+        payload,
+      })
+    }
+
+    const dispatchCommand = createUiDispatchCommand(normalizedWindowId)
+    const effectContext = normalizedWindowId == null
+      ? {}
+      : buildRunnerEffectContext({
+          windowId: normalizedWindowId,
+          dispatchCommand,
+        })
+
+    return Promise.resolve(effectService.executeCommand({
+      windowId: normalizedWindowId,
+      command,
+      payload,
+      dispatchCommand,
+      openDocumentWindow: (targetPath, options = {}) => {
+        return openDocumentWindowWithRuntimePolicy({
+          targetPath,
+          trigger: options.trigger || 'user',
+          isRecent: options.isRecent === true,
+          sourceWindowId: normalizedWindowId,
+          openWindow: openDocumentWindow,
+          getDocumentContext,
+          getSessionSnapshot,
+        })
+      },
+      prepareOpenPathInCurrentWindow: (targetPath, options = {}) => {
+        if (typeof prepareOpenPathInCurrentWindow !== 'function') {
+          return {
+            ok: true,
+            // 在当前窗口打开 = 新增标签，不会替换当前文档，因此没有“切换前保存”这一步。
+            decision: 'ready-to-switch',
+            path: targetPath || null,
+            sourceSessionId: options.sourceSessionId || null,
+            sourceRevision: options.sourceRevision,
+          }
+        }
+
+        return prepareOpenPathInCurrentWindow(normalizedWindowId, targetPath, {
+          entrySource: options.entrySource || null,
+          trigger: options.trigger || 'user',
+          sourceSessionId: options.sourceSessionId || null,
+          sourceRevision: options.sourceRevision,
+        })
+      },
+      openDocumentInCurrentWindow: (targetPath, options = {}) => {
+        if (typeof openDocumentInCurrentWindow !== 'function') {
+          return {
+            ok: false,
+            reason: 'open-document-in-current-window-not-configured',
+            path: targetPath || null,
+          }
+        }
+
+        return openDocumentInCurrentWindow(normalizedWindowId, targetPath, {
+          entrySource: options.entrySource || null,
+          trigger: options.trigger || 'user',
+          switchPolicy: options.switchPolicy || null,
+          expectedSessionId: options.expectedSessionId || null,
+          expectedRevision: options.expectedRevision,
+          // ⚠️ 这里是**白名单透传**，漏一个字段就会被静默丢弃。
+          // 分栏需要的三个字段必须显式带上，否则主进程收不到「建栏」的指令，
+          // 表现就是「预览说分栏、松手却什么都没变」。
+          ...(typeof options.targetGroupId === 'string' && options.targetGroupId
+            ? { targetGroupId: options.targetGroupId }
+            : {}),
+          ...(options.createGroup === true ? { createGroup: true } : {}),
+          ...(Number.isInteger(options.insertAt) ? { insertAt: options.insertAt } : {}),
+        })
+      },
+      // 注意签名：系统级打开必须显式指定目标窗口，
+      // 不能像 openDocumentInCurrentWindow 那样隐式绑定 normalizedWindowId（第二实例场景下它是 null）。
+      openDocumentTabInWindow: (windowId, targetPath, options = {}) => {
+        if (typeof openDocumentTabInWindow !== 'function') {
+          return {
+            ok: false,
+            reason: 'open-document-tab-not-configured',
+            path: targetPath || null,
+          }
+        }
+
+        return openDocumentTabInWindow(windowId, targetPath, {
+          trigger: options.trigger || 'user',
+        })
+      },
+      getTargetEditorWindowId,
+      // 目标文档已在某个窗口的标签页里打开时，主进程会直接聚焦窗口 + 激活标签，
+      // 并把结果翻译成 activated-existing-tab / focused-existing-window。
+      // 这里只把“发起打开的窗口”带下去，让主进程能区分本窗口标签与其它窗口。
+      resolveOpenExistingTab: targetPath => (
+        typeof resolveOpenExistingTabByPath === 'function'
+          ? resolveOpenExistingTabByPath(targetPath, normalizedWindowId)
+          : null
+      ),
+      getSessionSnapshot: () => getSessionSnapshot(normalizedWindowId),
+      ...effectContext,
+    })).then(result => normalizeEffectCommandResult(
+      normalizedWindowId,
+      command,
+      payload,
+      result,
+    ))
+  }
+
+  function executeSyncQuery(windowId, command, payload) {
+    const normalizedWindowId = isValidWindowId(windowId) ? windowId : null
+    if (normalizedWindowId != null && SYNC_QUERY_SET.has(command)) {
+      return executeResourceQuery({
+        windowId: normalizedWindowId,
+        command,
+        payload,
+      })
+    }
+    throw new Error(`未知同步查询: ${command}`)
+  }
+
+  function publishRecentListChanged(recentList) {
+    return windowBridge.publishRecentListChanged?.(recentList) || recentList
+  }
+
+  function openDocumentPath(targetPath, options = {}) {
+    return executeUiCommand(options.sourceWindowId || null, 'document.open-path', {
+      path: targetPath,
+      entrySource: options.entrySource || null,
+      trigger: options.trigger || 'user',
+      baseDir: options.baseDir || null,
+    })
+  }
+
+  /**
+   * 把文档作为新标签开进“最近活动的编辑窗口”。
+   *
+   * 这是系统级打开（双击文件 / 第二实例）的入口：
+   * 它不绑定发起窗口，也不要求 switchPolicy / expected session 协议，
+   * 因为新增标签不会替换任何已有文档。
+   * 一个窗口都没有时，主进程会退回新建窗口。
+   *
+   * @param {string} targetPath
+   * @param {{ trigger?: string, baseDir?: string }} [options]
+   */
+  function openDocumentPathAsTab(targetPath, options = {}) {
+    return executeUiCommand(options.sourceWindowId || null, 'document.open-path-as-tab', {
+      path: targetPath,
+      trigger: options.trigger || 'second-instance',
+      baseDir: options.baseDir || null,
+    })
+  }
+
+  function openRecent(targetPath, options = {}) {
+    return executeUiCommand(options.sourceWindowId || null, 'document.open-recent', {
+      path: targetPath,
+      entrySource: options.entrySource || 'recent',
+      trigger: options.trigger || 'user',
+      baseDir: options.baseDir || null,
+    })
+  }
+
+  runtimeApi = {
+    store,
+    saveCoordinator,
+    commandService,
+    effectService,
+    fileManagerService,
+    directoryWatchService,
+    windowBridge,
+    resourceService,
+    dispatch,
+    executeUiCommand,
+    executeSyncQuery,
+    getSessionSnapshot,
+    getDocumentContext,
+    publishRecentListChanged,
+    openDocumentPath,
+    openDocumentPathAsTab,
+    openRecent,
+  }
+
+  return runtimeApi
+}
+
+export function initializeDocumentSessionRuntime(deps = {}) {
+  activeDocumentSessionRuntime = createDocumentSessionRuntime(deps)
+  return activeDocumentSessionRuntime
+}
+
+export function getDocumentSessionRuntime() {
+  if (!activeDocumentSessionRuntime) {
+    throw new Error('document session runtime 尚未初始化')
+  }
+  return activeDocumentSessionRuntime
+}
+
+export function resetDocumentSessionRuntime() {
+  activeDocumentSessionRuntime = null
+}
+
+export default {
+  createDocumentSessionRuntime,
+  initializeDocumentSessionRuntime,
+  getDocumentSessionRuntime,
+  normalizeOpenCommandResult,
+  openDocumentWindowWithRuntimePolicy,
+  resetDocumentSessionRuntime,
+}

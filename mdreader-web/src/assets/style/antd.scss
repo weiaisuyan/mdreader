@@ -1,0 +1,370 @@
+// 图片预览
+.ant-image-preview-root {
+  .ant-image-preview-wrap {
+    position: absolute;
+  }
+  .ant-image-preview-mask {
+    position: absolute;
+  }
+  .ant-image-preview-operations-wrapper {
+    position: absolute;
+  }
+}
+
+:root[theme='dark'] {
+  // 锚点链接文字颜色
+  .ant-anchor-link-title:not(.ant-anchor-link-title-active) {
+    color: var(--wj-markdown-text-primary) !important;
+  }
+
+  // 描述列表文字颜色
+  .ant-descriptions-item-label,
+  .ant-descriptions-title,
+  .ant-descriptions-item-content {
+    color: var(--wj-markdown-text-primary) !important;
+  }
+
+  // 描述列表 边框
+  .ant-descriptions.ant-descriptions-bordered {
+    .ant-descriptions-view {
+      border: 1px solid var(--wj-markdown-border-primary);
+    }
+    .ant-descriptions-row {
+      border-bottom: 1px solid var(--wj-markdown-border-primary);
+    }
+    .ant-descriptions-row:last-child {
+      border-bottom: none;
+    }
+    .ant-descriptions-item-content,
+    .ant-descriptions-item-label {
+      border-inline-end: 1px solid var(--wj-markdown-border-primary);
+    }
+    .ant-descriptions-item-content:last-child {
+      border-inline-end: none;
+    }
+  }
+
+  // input slot
+  .ant-input-group {
+    .ant-input-group-addon {
+      background-color: var(--wj-markdown-bg-secondary);
+      border-color: var(--wj-markdown-bg-secondary);
+    }
+  }
+
+  // 锚点链接轨道颜色
+  .ant-anchor-wrapper:not(.ant-anchor-wrapper-horizontal) {
+    .ant-anchor::before {
+      border-inline-start: 2px solid var(--wj-markdown-bg-secondary);
+    }
+  }
+
+  // 滑块轨道
+  .ant-slider {
+    .ant-slider-rail {
+      background-color: var(--wj-markdown-bg-secondary);
+    }
+  }
+
+  // 下拉菜单背景颜色
+  .ant-dropdown .ant-dropdown-menu,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu,
+  .ant-dropdown .ant-dropdown-arrow::before {
+    background-color: var(--wj-markdown-bg-tertiary);
+  }
+
+  // 下拉菜单文字颜色
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item,
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-submenu-title,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-submenu-title {
+    color: var(--wj-markdown-text-primary);
+  }
+
+  // 多级下拉 箭头颜色
+  .ant-dropdown
+    .ant-dropdown-menu
+    .ant-dropdown-menu-item
+    .ant-dropdown-menu-submenu-expand-icon
+    .ant-dropdown-menu-submenu-arrow-icon,
+  .ant-dropdown-menu-submenu
+    .ant-dropdown-menu
+    .ant-dropdown-menu-item
+    .ant-dropdown-menu-submenu-expand-icon
+    .ant-dropdown-menu-submenu-arrow-icon,
+  .ant-dropdown
+    .ant-dropdown-menu
+    .ant-dropdown-menu-submenu-title
+    .ant-dropdown-menu-submenu-expand-icon
+    .ant-dropdown-menu-submenu-arrow-icon,
+  .ant-dropdown-menu-submenu
+    .ant-dropdown-menu
+    .ant-dropdown-menu-submenu-title
+    .ant-dropdown-menu-submenu-expand-icon
+    .ant-dropdown-menu-submenu-arrow-icon {
+    color: var(--wj-markdown-text-tertiary);
+  }
+
+  // 下拉菜单 hover 样式
+  .ant-dropdown-menu-item:hover,
+  .ant-dropdown-menu-submenu-title:hover {
+    border-radius: 4px;
+    background-color: var(--wj-markdown-bg-hover) !important;
+  }
+
+  // 下拉菜单 hover 样式 （有下级）
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item-divider,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item-divider,
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-submenu-title-divider,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-submenu-title-divider {
+    background-color: var(--wj-markdown-bg-secondary);
+  }
+
+  // 下拉菜单禁用项：
+  // 上面的“下拉菜单文字颜色”规则优先级高于 ant-design-vue 自带的
+  // .ant-dropdown-menu-item-disabled，会把禁用项刷成正常文字色，
+  // 不补这条的话暗色模式下禁用项和可用项看起来一模一样。
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item-disabled,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item-disabled,
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-submenu-title-disabled,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-submenu-title-disabled {
+    // 用 opacity 而不是换色值：自动叠加在已有文字色上，无需为明暗各维护一份颜色
+    color: var(--wj-markdown-text-primary) !important;
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  // 下拉菜单选中项
+  // ant-design-vue 自带样式给选中项的是「primary-1 浅蓝底 + 主色文字」，
+  // 而上面的“下拉菜单文字颜色”规则又把文字统一刷成主题文字色，
+  // 两者叠加在暗色主题下会变成「浅底 + 浅字」，几乎看不清（视图模式菜单就踩过）。
+  // 这里统一改成主题色板：底色用 hover 色，文字用主文字色，勾选图标跟随文字色。
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item-selected,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item-selected,
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-submenu-selected,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-submenu-selected {
+    color: var(--wj-markdown-text-primary);
+    background-color: var(--wj-markdown-bg-hover);
+
+    .anticon {
+      color: var(--wj-markdown-text-primary);
+    }
+  }
+
+  // 禁用项不该有 hover 反馈
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-item-disabled:hover,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-item-disabled:hover,
+  .ant-dropdown .ant-dropdown-menu .ant-dropdown-menu-submenu-title-disabled:hover,
+  .ant-dropdown-menu-submenu .ant-dropdown-menu .ant-dropdown-menu-submenu-title-disabled:hover {
+    background-color: transparent !important;
+  }
+
+  // 单选框组
+  .ant-radio-button-wrapper {
+    transition: none !important;
+    &:not(:first-child)::before {
+      display: none;
+    }
+    &:not(.ant-radio-button-wrapper-checked) {
+      color: var(--wj-markdown-text-primary);
+      background-color: var(--wj-markdown-bg-secondary);
+      border-color: var(--wj-markdown-bg-secondary);
+    }
+    &:first-child {
+      border-inline-start: var(--wj-markdown-bg-secondary);
+    }
+  }
+  // 数字输入框
+  .ant-input-number {
+    &:not(.ant-input-number-focused):not(:hover) {
+      border-color: var(--wj-markdown-bg-secondary);
+    }
+    background-color: var(--wj-markdown-bg-secondary);
+    color: var(--wj-markdown-text-primary);
+    .ant-input-number-input {
+      color: var(--wj-markdown-text-primary);
+    }
+  }
+
+  .ant-input-affix-wrapper {
+    background-color: var(--wj-markdown-bg-secondary);
+    color: var(--wj-markdown-text-primary);
+    &:not(.ant-input-affix-wrapper-focused):not(:hover) {
+      border-color: var(--wj-markdown-bg-secondary);
+    }
+    .ant-input-suffix {
+      .anticon {
+        color: var(--wj-markdown-text-tertiary);
+      }
+    }
+  }
+
+  // 下拉选择框
+  .ant-select:not(.ant-select-customize-input) {
+    .ant-select-selector {
+      background-color: var(--wj-markdown-bg-secondary);
+      border: 1px solid var(--wj-markdown-bg-secondary);
+    }
+  }
+
+  .ant-select {
+    * {
+      color: var(--wj-markdown-text-primary) !important;
+    }
+    .ant-select-clear {
+      background-color: var(--wj-markdown-bg-secondary);
+    }
+  }
+  .ant-select-dropdown {
+    background-color: var(--wj-markdown-bg-tertiary);
+    .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+      background-color: var(--wj-markdown-bg-hover);
+    }
+    .ant-select-item {
+      color: var(--wj-markdown-text-primary) !important;
+    }
+    .ant-select-item.ant-select-item-option-active {
+      background-color: var(--wj-markdown-bg-secondary);
+    }
+  }
+
+  .ant-input {
+    color: var(--wj-markdown-text-primary);
+    background-color: var(--wj-markdown-bg-secondary);
+    &:not(:focus):not(:hover) {
+      border-color: var(--wj-markdown-bg-secondary);
+    }
+    &::placeholder {
+      color: rgba(255, 255, 255, 0.1);
+    }
+  }
+
+  .ant-input-password {
+    color: var(--wj-markdown-text-primary);
+    background-color: var(--wj-markdown-bg-secondary);
+    &:not(:focus):not(:hover) {
+      border-color: var(--wj-markdown-bg-secondary);
+    }
+  }
+
+  .ant-modal {
+    .ant-modal-header {
+      background-color: var(--wj-markdown-bg-tertiary);
+      .ant-modal-title {
+        color: var(--wj-markdown-text-primary);
+      }
+    }
+    .ant-modal-content {
+      background-color: var(--wj-markdown-bg-tertiary);
+    }
+    .ant-modal-confirm-title {
+      color: var(--wj-markdown-text-primary);
+    }
+    .ant-modal-confirm-content {
+      color: var(--wj-markdown-text-primary);
+    }
+    .ant-modal-close {
+      color: var(--wj-markdown-text-primary);
+
+      &:hover {
+        background-color: var(--wj-markdown-bg-hover);
+      }
+    }
+  }
+  .ant-btn.ant-btn-default {
+    border-color: var(--wj-markdown-bg-secondary);
+    background-color: var(--wj-markdown-bg-secondary);
+    color: var(--wj-markdown-text-primary);
+    &:hover {
+      background-color: var(--wj-markdown-bg-hover);
+    }
+  }
+
+  .ant-progress {
+    .ant-progress-inner {
+      background-color: var(--wj-markdown-bg-secondary);
+    }
+    .ant-progress-text {
+      color: var(--wj-markdown-text-primary);
+    }
+  }
+
+  .ant-form-item {
+    .ant-form-item-label {
+      > label {
+        color: var(--wj-markdown-text-primary);
+      }
+    }
+  }
+
+  .ant-checkbox-wrapper {
+    color: var(--wj-markdown-text-primary);
+  }
+}
+
+// 顶栏「视图模式」折叠菜单
+// 三行等宽、行高收紧；勾选位由模板留出固定宽度，
+// 这里只补布局（左文字 + 右快捷键）与尺寸，颜色全部走主题变量。
+// 刻意放在 :root[theme='dark'] 之外：明暗两种主题必须是同一套尺寸，
+// 否则亮色下菜单又窄又挤、暗色下宽一圈（实测两主题宽度一度差 60px）。
+.wj-view-mode-dropdown {
+  .ant-dropdown-menu {
+    min-width: 180px;
+    padding: 4px;
+  }
+
+  .ant-dropdown-menu-item {
+    padding: 6px 10px !important;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 20px;
+  }
+
+  .ant-dropdown-menu-title-content {
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+}
+
+/**
+ * 全局轻提示（message）的主题适配。
+ *
+ * ant-design 默认是**白底**，在深色主题下就是一块突兀的白条 ——
+ * 跟编辑器里任何其它面板都不搭。这里统一改成跟随主题：
+ * 用编辑器自己的背景色/文字色/描边，圆角与阴影对齐其它浮层。
+ */
+:root[theme='dark'] {
+  .ant-message-notice-content {
+    background: var(--wj-markdown-bg-primary);
+    color: var(--wj-markdown-text-primary);
+    border: 1px solid var(--wj-markdown-border-primary);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+
+  // 图标跟着文字走，避免默认蓝色/绿色在深底上过亮
+  .ant-message-custom-content > .anticon {
+    font-size: 15px;
+    opacity: 0.9;
+  }
+
+  // 成功 / 失败仍然保留语义色，只压一点亮度
+  .ant-message-success .anticon {
+    color: #4ec9a0;
+  }
+
+  .ant-message-error .anticon {
+    color: #f07178;
+  }
+
+  .ant-message-warning .anticon {
+    color: #e0a33e;
+  }
+
+  .ant-message-info .anticon {
+    color: var(--wj-markdown-sash-hover, #0fb6d6);
+  }
+}

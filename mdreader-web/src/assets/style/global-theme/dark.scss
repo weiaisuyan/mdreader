@@ -1,0 +1,23 @@
+:root[theme='dark'] {
+  // 文字颜色（Obsidianite：正文 #bebebe，次要 #9d99ab，弱化 #6f6b7d）
+  --wj-markdown-text-primary: #bebebe;
+  --wj-markdown-text-secondary: #9d99ab;
+  --wj-markdown-text-tertiary: #6f6b7d;
+  // 背景颜色（Obsidian background-primary / secondary / alt）
+  --wj-markdown-bg-primary: #100e17;
+  --wj-markdown-bg-secondary: #191621;
+  --wj-markdown-bg-tertiary: #0d0b12;
+  // 悬停/激活底色用中性灰紫，不要用青色，否则文件栏选中会「太艳」
+  --wj-markdown-bg-hover: rgba(157, 153, 171, 0.13);
+  --wj-markdown-border-primary: rgba(14, 210, 247, 0.1);
+  // 窗口外框专用色。深色窗口底色 #100e17 与桌面/其它深色窗口几乎一致，
+  // 用 border-primary（10% 透明）当外框几乎看不见。
+  // 0.28 仍偏淡（用户反馈两次「看不见」），提到 0.5：在 #100e17 上约 #0d6a80，
+  // 边界清晰但不刺眼。
+  --wj-window-border: rgba(14, 210, 247, 0.5);
+  --wj-markdown-scroll-bg: rgba(14, 210, 247, 0.16);
+  --wj-markdown-text-warning: #f4569d;
+  --wj-markdown-sash-hover: #0fb6d6;
+  --img-box-shadow: 0 0 0.5rem rgba(14, 210, 247, 0.12);
+  color-scheme: dark;
+}

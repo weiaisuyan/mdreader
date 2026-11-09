@@ -1,0 +1,62 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+electron-build/
+web-dist/
+node_modules/
+### IntelliJ IDEA ###
+.idea
+/log/
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+config.json
+recent.json
+TempImg/
+
+mdreader-electron/img/
+mdreader-electron/data/
+mdreader-electron/tab-group.json
+
+login_info
+
+last_opened.json
+
+wj-markdown-editor.db
+
+### 构建/调试临时产物 ###
+# 这些目录和日志是构建脚本与调试过程产生的，不进版本库。
+# 不写在这里的话，每次构建/排查都会重新长出一堆未跟踪文件，
+# 污染 rg/find/IDE 索引（曾累计到 656 MB）。
+.tmp/
+.tmp-esbuild/
+.tmp-eb/
+*.bak
+mdreader-electron/launch.log
+# 旧目录名（改名前的路径），防止历史残留被重新加入
+wj-markdown-editor-electron/data/
+wj-markdown-editor-electron/tab-group.json

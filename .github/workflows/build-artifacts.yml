@@ -1,0 +1,274 @@
+name: Build And Release Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release_notes_path: ${{ steps.version.outputs.release_notes_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Read version from electron package.json
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./wj-markdown-editor-electron/package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "release_notes_path=release-notes/${version}.md" >> "$GITHUB_OUTPUT"
+
+      - name: Validate tag matches package version
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_version="${{ steps.version.outputs.version }}"
+          pushed_tag="${{ github.ref_name }}"
+
+          if [[ "$pushed_tag" != "$expected_version" ]]; then
+            echo "推送的 tag ($pushed_tag) 与 package.json 版本 ($expected_version) 不一致"
+            exit 1
+          fi
+
+      - name: Validate release notes file
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes_path="${{ steps.version.outputs.release_notes_path }}"
+
+          if [[ ! -f "$notes_path" ]]; then
+            echo "未找到发布说明文件: $notes_path"
+            exit 1
+          fi
+
+          if [[ ! -s "$notes_path" ]]; then
+            echo "发布说明文件为空: $notes_path"
+            exit 1
+          fi
+
+  create-release:
+    needs: prepare-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Create or update Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare-version.outputs.version }}
+          RELEASE_NOTES_PATH: ${{ needs.prepare-version.outputs.release_notes_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --notes-file "$RELEASE_NOTES_PATH" \
+              --draft=false \
+              --prerelease=false
+          else
+            gh release create "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --notes-file "$RELEASE_NOTES_PATH" \
+              --target "$GITHUB_SHA"
+          fi
+
+  release-windows:
+    needs:
+      - prepare-version
+      - create-release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            wj-markdown-editor-web/package-lock.json
+            wj-markdown-editor-electron/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: wj-markdown-editor-web
+
+      - name: Build web
+        run: npm run build
+        working-directory: wj-markdown-editor-web
+
+      - name: Install electron dependencies
+        run: npm ci
+        working-directory: wj-markdown-editor-electron
+
+      - name: Build electron (Windows)
+        run: npm run build -- --win --publish never
+        working-directory: wj-markdown-editor-electron
+
+      - name: Validate Windows artifacts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $patterns = @(
+            'wj-markdown-editor-electron/electron-build/latest.yml',
+            'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.exe',
+            'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.exe.blockmap',
+            'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.zip'
+          )
+
+          foreach ($pattern in $patterns) {
+            $items = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
+            if (-not $items) {
+              throw "未找到构建文件: $pattern"
+            }
+          }
+
+      - name: Upload Windows assets to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare-version.outputs.version }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            Get-ChildItem 'wj-markdown-editor-electron/electron-build/latest.yml' | Select-Object -ExpandProperty FullName
+            Get-ChildItem 'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.exe' | Select-Object -ExpandProperty FullName
+            Get-ChildItem 'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.exe.blockmap' | Select-Object -ExpandProperty FullName
+            Get-ChildItem 'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.zip' | Select-Object -ExpandProperty FullName
+          )
+
+          gh release upload $env:RELEASE_TAG @files --clobber
+
+  release-linux:
+    needs:
+      - prepare-version
+      - create-release
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            wj-markdown-editor-web/package-lock.json
+            wj-markdown-editor-electron/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: wj-markdown-editor-web
+
+      - name: Build web
+        run: npm run build
+        working-directory: wj-markdown-editor-web
+
+      - name: Install electron dependencies
+        run: npm ci
+        working-directory: wj-markdown-editor-electron
+
+      - name: Install rpm tool
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y rpm
+          rpm --version
+
+      - name: Prepare AppImage toolset with update information
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLSET_DIR="$RUNNER_TEMP/appimage-toolset"
+          mkdir -p "$TOOLSET_DIR"
+          curl -sSL "https://github.com/electron-userland/electron-builder-binaries/releases/download/appimage%401.0.2/appimage-tools-runtime-20251108.tar.gz" \
+            | tar -xz -C "$TOOLSET_DIR"
+          node wj-markdown-editor-electron/scripts/injectUpdateInfo.cjs \
+            "$TOOLSET_DIR/runtimes/runtime-x64" \
+            "gh-releases-zsync|nlbwqmz|wj-markdown-editor|latest|wj-markdown-editor-*.AppImage.zsync"
+          echo "APPIMAGE_TOOLS_PATH=$TOOLSET_DIR" >> "$GITHUB_ENV"
+
+      - name: Build electron (Linux)
+        run: npm run build -- --linux --publish never
+        working-directory: wj-markdown-editor-electron
+
+      - name: Validate Linux artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_file() {
+            local pattern="$1"
+            if ! compgen -G "$pattern" > /dev/null; then
+              echo "未找到构建文件: $pattern"
+              exit 1
+            fi
+          }
+
+          check_file "wj-markdown-editor-electron/electron-build/latest-linux.yml"
+          check_file "wj-markdown-editor-electron/electron-build/wj-markdown-editor-linux-amd64-*.deb"
+          check_file "wj-markdown-editor-electron/electron-build/wj-markdown-editor-linux-x86_64-*.rpm"
+          check_file "wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage"
+
+          # 校验 AppImage 使用静态 runtime（不依赖 libfuse2），防止 toolsets 配置回退
+          APPIMAGE_FILE=$(compgen -G "wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage" | head -n 1)
+          if readelf -lW "$APPIMAGE_FILE" | grep -q 'Requesting program interpreter'; then
+            echo "AppImage runtime 为动态链接，与静态 runtime 预期不符"
+            exit 1
+          fi
+          echo "AppImage runtime 校验通过：静态链接"
+
+          # 校验 AppImage 已嵌入 AppImageUpdate 的 update information
+          if ! "$APPIMAGE_FILE" --appimage-updateinformation | tr -d '\0' | grep -q "^gh-releases-zsync|nlbwqmz|wj-markdown-editor|"; then
+            echo "AppImage update information 校验失败"
+            exit 1
+          fi
+          echo "AppImage update information 校验通过"
+
+      - name: Generate zsync file
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get install --no-install-recommends -y zsync
+          APPIMAGE_FILE=$(compgen -G "wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage" | head -n 1)
+          VERSION=$(node -p "require('./wj-markdown-editor-electron/package.json').version")
+          zsyncmake \
+            -u "https://github.com/nlbwqmz/wj-markdown-editor/releases/download/${VERSION}/$(basename "$APPIMAGE_FILE")" \
+            -o "${APPIMAGE_FILE}.zsync" \
+            "$APPIMAGE_FILE"
+          ls -lh "${APPIMAGE_FILE}.zsync"
+
+      - name: Upload Linux assets to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare-version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release upload "$RELEASE_TAG" \
+            wj-markdown-editor-electron/electron-build/latest-linux.yml \
+            wj-markdown-editor-electron/electron-build/wj-markdown-editor-linux-amd64-*.deb \
+            wj-markdown-editor-electron/electron-build/wj-markdown-editor-linux-x86_64-*.rpm \
+            wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage \
+            wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage.zsync \
+            --clobber

@@ -1,0 +1,226 @@
+import { describe, expect, it } from 'vitest'
+import defaultConfig from '../../defaultConfig.js'
+import { repairConfig } from '../configRepairUtil.js'
+
+describe('configRepairUtil', () => {
+  it('缺失字段必须从 defaultConfig 补齐', () => {
+    const repaired = repairConfig({
+      theme: {
+        preview: 'github',
+      },
+    }, defaultConfig)
+
+    expect(repaired.sidebarDefaultView).toBe(defaultConfig.sidebarDefaultView)
+    expect(repaired.theme.global).toBe(defaultConfig.theme.global)
+  })
+
+  it('缺失 sidebarWidth 时必须从默认配置补齐', () => {
+    const legacyConfig = { ...defaultConfig }
+    delete legacyConfig.sidebarWidth
+
+    const repaired = repairConfig(legacyConfig, defaultConfig)
+
+    expect(repaired.sidebarWidth).toBe(280)
+  })
+
+  it('缺失 sidebarDefaultView 时必须从默认配置补齐', () => {
+    const legacyConfig = { ...defaultConfig }
+    delete legacyConfig.sidebarDefaultView
+
+    const repaired = repairConfig(legacyConfig, defaultConfig)
+
+    expect(repaired.sidebarDefaultView).toBe('close')
+  })
+
+  it('缺失 fileManagerSort 时必须从默认配置补齐', () => {
+    const legacyConfig = { ...defaultConfig }
+    delete legacyConfig.fileManagerSort
+
+    const repaired = repairConfig(legacyConfig, defaultConfig)
+
+    expect(repaired.fileManagerSort).toEqual({
+      field: 'type',
+      direction: 'asc',
+    })
+  })
+
+  it('缺失 fileManagerLeftClickAction 时必须从默认配置补齐', () => {
+    const legacyConfig = { ...defaultConfig }
+    delete legacyConfig.fileManagerLeftClickAction
+
+    const repaired = repairConfig(legacyConfig, defaultConfig)
+
+    expect(repaired.fileManagerLeftClickAction).toEqual({
+      markdown: 'prompt',
+    })
+  })
+
+  it('缺失 markdown.imageShadow 时必须从默认配置补齐', () => {
+    const legacyConfig = JSON.parse(JSON.stringify(defaultConfig))
+    delete legacyConfig.markdown.imageShadow
+    legacyConfig.markdown.typographer = false
+
+    const repaired = repairConfig(legacyConfig, defaultConfig)
+
+    expect(repaired.markdown.imageShadow).toBe(true)
+    expect(repaired.markdown.typographer).toBe(false)
+  })
+
+  it('默认配置中不存在的旧字段必须被裁掉', () => {
+    const repaired = repairConfig({
+      legacyField: 'deprecated',
+      theme: {
+        ...defaultConfig.theme,
+        legacyPreviewOption: true,
+      },
+    }, defaultConfig)
+
+    expect('legacyField' in repaired).toBe(false)
+    expect('legacyPreviewOption' in repaired.theme).toBe(false)
+  })
+
+  it('必须删除不存在的快捷键并补齐缺失项', () => {
+    const repaired = repairConfig({
+      shortcutKeyList: [{ id: 'unknown', index: 999 }],
+    }, defaultConfig)
+
+    expect(repaired.shortcutKeyList.some(item => item.id === 'unknown')).toBe(false)
+    expect(repaired.shortcutKeyList.some(item => item.id === 'save')).toBe(true)
+  })
+
+  it('残缺快捷键项按 id 补全时必须使用同 id 的默认字段', () => {
+    const repaired = repairConfig({
+      shortcutKeyList: [{ id: 'save', index: 999 }],
+    }, defaultConfig)
+
+    const saveShortcutKey = repaired.shortcutKeyList.find(item => item.id === 'save')
+    const defaultSaveShortcutKey = defaultConfig.shortcutKeyList.find(item => item.id === 'save')
+
+    expect(saveShortcutKey).toBeDefined()
+    expect(saveShortcutKey.name).toBe(defaultSaveShortcutKey.name)
+    expect(saveShortcutKey.keymap).toBe(defaultSaveShortcutKey.keymap)
+    expect(saveShortcutKey.type).toBe(defaultSaveShortcutKey.type)
+  })
+
+  it('旧配置缺失全屏切换与文件管理栏切换快捷键时必须自动补齐并保持新顺序', () => {
+    const repaired = repairConfig({
+      shortcutKeyList: defaultConfig.shortcutKeyList.filter(item => !['toggleFullScreen', 'toggleFileManagerPanel'].includes(item.id)),
+    }, defaultConfig)
+
+    const toggleFullScreenShortcutKey = repaired.shortcutKeyList.find(item => item.id === 'toggleFullScreen')
+    const toggleFileManagerPanelShortcutKey = repaired.shortcutKeyList.find(item => item.id === 'toggleFileManagerPanel')
+    const defaultToggleFullScreenShortcutKey = defaultConfig.shortcutKeyList.find(item => item.id === 'toggleFullScreen')
+    const defaultToggleFileManagerPanelShortcutKey = defaultConfig.shortcutKeyList.find(item => item.id === 'toggleFileManagerPanel')
+    expect(toggleFullScreenShortcutKey).toBeDefined()
+    expect(toggleFullScreenShortcutKey).toMatchObject(defaultToggleFullScreenShortcutKey)
+    expect(toggleFileManagerPanelShortcutKey).toBeDefined()
+    expect(toggleFileManagerPanelShortcutKey).toMatchObject(defaultToggleFileManagerPanelShortcutKey)
+
+    // 顺序断言不能靠“相邻 id”：任何同 index 的新键插入都会让它失效。
+    // 这里改为断言分组内的相对次序、id 集合完整性、以及 index 单调。
+    const indexOfShortcutKey = id => repaired.shortcutKeyList.findIndex(item => item.id === id)
+
+    expect(indexOfShortcutKey('viewSource')).toBeLessThan(indexOfShortcutKey('viewSplit'))
+    expect(indexOfShortcutKey('viewSplit')).toBeLessThan(indexOfShortcutKey('viewPreview'))
+    expect(indexOfShortcutKey('viewPreview')).toBeLessThan(indexOfShortcutKey('toggleFullScreen'))
+    expect(indexOfShortcutKey('toggleFullScreen')).toBeLessThan(indexOfShortcutKey('toggleFileManagerPanel'))
+
+    expect(repaired.shortcutKeyList.map(item => item.id).sort())
+      .toEqual(defaultConfig.shortcutKeyList.map(item => item.id).sort())
+
+    const repairedIndexList = repaired.shortcutKeyList.map(item => item.index)
+    expect(repairedIndexList).toEqual([...repairedIndexList].sort((a, b) => a - b))
+  })
+
+  it('旧配置缺失标签页快捷键时必须补齐且默认不带键位，同时不得覆盖用户已配键位', () => {
+    const newShortcutKeyIdList = ['switchToNextTab', 'switchToPreviousTab', 'closeTab']
+
+    // 模拟存量配置：没有三项新增快捷键，但用户已把 save 改成自定义键位。
+    const legacyShortcutKeyList = defaultConfig.shortcutKeyList
+      .filter(item => !newShortcutKeyIdList.includes(item.id))
+      .map(item => (item.id === 'save' ? { ...item, keymap: 'Ctrl+Shift+Alt+s' } : item))
+
+    const repaired = repairConfig({ shortcutKeyList: legacyShortcutKeyList }, defaultConfig)
+
+    for (const id of newShortcutKeyIdList) {
+      const repairedShortcutKey = repaired.shortcutKeyList.find(item => item.id === id)
+
+      expect(repairedShortcutKey).toBeDefined()
+      // 补齐后必须是空键位：不能让存量用户升级后凭空多出生效的全局快捷键。
+      expect(repairedShortcutKey.keymap).toBe('')
+      expect(repairedShortcutKey.enabled).toBe(true)
+      expect(repairedShortcutKey.type).toBe('web')
+    }
+
+    expect(repaired.shortcutKeyList.find(item => item.id === 'save').keymap).toBe('Ctrl+Shift+Alt+s')
+
+    // 新增项 index 为 11，必须落在既有最大分组（editor-focus-line，index 10）之后。
+    const focusLineIndex = repaired.shortcutKeyList.findIndex(item => item.id === 'editor-focus-line')
+    const closeTabIndex = repaired.shortcutKeyList.findIndex(item => item.id === 'closeTab')
+
+    expect(closeTabIndex).toBeGreaterThan(focusLineIndex)
+  })
+
+  it('用户已为标签页快捷键配好键位时，repair 必须原样保留', () => {
+    const repaired = repairConfig({
+      shortcutKeyList: defaultConfig.shortcutKeyList.map(item => (
+        item.id === 'closeTab' ? { ...item, keymap: 'Ctrl+Shift+w' } : item
+      )),
+    }, defaultConfig)
+
+    expect(repaired.shortcutKeyList.find(item => item.id === 'closeTab').keymap).toBe('Ctrl+Shift+w')
+  })
+
+  it('shortcutKeyList 含 null 等脏项时不得抛错，未知脏项必须被忽略且默认快捷键仍会补齐', () => {
+    expect(() => repairConfig({
+      shortcutKeyList: [
+        null,
+        undefined,
+        'oops',
+        123,
+        { id: 'unknown', index: 999 },
+        { id: 'save', enabled: false },
+      ],
+    }, defaultConfig)).not.toThrow()
+
+    const repaired = repairConfig({
+      shortcutKeyList: [
+        null,
+        undefined,
+        'oops',
+        123,
+        { id: 'unknown', index: 999 },
+        { id: 'save', enabled: false },
+      ],
+    }, defaultConfig)
+
+    expect(repaired.shortcutKeyList.some(item => item.id === 'unknown')).toBe(false)
+    expect(repaired.shortcutKeyList.some(item => item.id === 'save')).toBe(true)
+    expect(repaired.shortcutKeyList.length).toBe(defaultConfig.shortcutKeyList.length)
+  })
+
+  it('重复的合法快捷键 id 只保留第一次出现的项', () => {
+    const repaired = repairConfig({
+      shortcutKeyList: [
+        { id: 'save', enabled: false },
+        { id: 'save', enabled: true },
+      ],
+    }, defaultConfig)
+
+    const saveShortcutKeys = repaired.shortcutKeyList.filter(item => item.id === 'save')
+
+    expect(saveShortcutKeys).toHaveLength(1)
+    expect(saveShortcutKeys[0].enabled).toBe(false)
+    expect(repaired.shortcutKeyList.length).toBe(defaultConfig.shortcutKeyList.length)
+  })
+
+  it('旧 preview 主题 github-light 必须修正为 github', () => {
+    const repaired = repairConfig({
+      theme: {
+        preview: 'github-light',
+      },
+    }, defaultConfig)
+
+    expect(repaired.theme.preview).toBe('github')
+  })
+})

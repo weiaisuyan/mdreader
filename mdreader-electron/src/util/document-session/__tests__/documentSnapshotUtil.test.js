@@ -1,0 +1,213 @@
+import { describe, expect, it } from 'vitest'
+import { createBoundFileSession, createDraftSession, createRecentMissingSession } from '../documentSessionFactory.js'
+import { deriveDocumentSnapshot, deriveDocumentTabSnapshot } from '../documentSnapshotUtil.js'
+
+describe('documentSnapshotUtil', () => {
+  it('deriveDocumentSnapshot 在编辑内容和磁盘基线不一致时，应返回 dirty=true', () => {
+    const session = createDraftSession({
+      sessionId: 'draft-session',
+      now: 1700000000010,
+    })
+
+    // 这里故意直接改编辑快照，模拟“用户已经输入，但主进程尚未保存”。
+    // 快照推导必须只读地识别差异，而不是依赖外部手动维护 dirty 标记。
+    session.editorSnapshot.content = '# 已修改内容'
+    session.editorSnapshot.revision = 1
+
+    const snapshot = deriveDocumentSnapshot(session)
+
+    expect(snapshot.dirty).toBe(true)
+    expect(snapshot.saved).toBe(false)
+    expect(snapshot.content).toBe('# 已修改内容')
+    expect(snapshot.exists).toBe(false)
+    expect(snapshot.resourceContext).toEqual({
+      documentPath: null,
+      saved: false,
+      exists: false,
+    })
+    expect(snapshot.revision).toBe(1)
+  })
+
+  it('deriveDocumentSnapshot 在 recent-missing 会话上，应保持缺失路径展示语义', () => {
+    const snapshot = deriveDocumentSnapshot({
+      sessionId: 'recent-missing-session',
+      documentSource: {
+        path: null,
+        exists: false,
+        missingPath: 'C:/docs/missing.md',
+        missingReason: 'recent-missing',
+        encoding: 'utf-8',
+        lastKnownStat: null,
+      },
+      editorSnapshot: {
+        content: '',
+        revision: 0,
+        updatedAt: 1700000000020,
+      },
+      diskSnapshot: {
+        content: '',
+        versionHash: 'empty-hash',
+        exists: false,
+        stat: null,
+        observedAt: 1700000000020,
+        source: 'recent-missing',
+      },
+      persistedSnapshot: {
+        content: '',
+        revision: 0,
+        savedAt: null,
+        path: null,
+        jobId: null,
+      },
+      saveRuntime: {
+        status: 'idle',
+        inFlightJobId: null,
+        inFlightRevision: null,
+        inFlightBaseDiskVersionHash: null,
+        requestedRevision: 0,
+        trigger: null,
+        lastError: null,
+      },
+      externalRuntime: {
+        pendingExternalChange: null,
+        resolutionState: 'idle',
+        lastResolutionResult: 'none',
+        lastHandledVersionHash: null,
+        lastKnownDiskVersionHash: 'empty-hash',
+      },
+      watchRuntime: {
+        bindingToken: 0,
+        watchingPath: null,
+        watchingDirectoryPath: null,
+        status: 'idle',
+        fileExists: false,
+        eventFloorObservedAt: 0,
+        recentInternalWrites: [],
+        lastError: null,
+      },
+      closeRuntime: {
+        intent: null,
+        promptReason: null,
+        waitingSaveJobId: null,
+        awaitingPathSelection: false,
+        forceClose: false,
+      },
+    })
+
+    expect(snapshot.isRecentMissing).toBe(true)
+    expect(snapshot.fileName).toBe('Untitled')
+    expect(snapshot.displayPath).toBe('C:/docs/missing.md')
+    expect(snapshot.recentMissingPath).toBe('C:/docs/missing.md')
+    expect(snapshot.saved).toBe(true)
+    expect(snapshot.dirty).toBe(false)
+    expect(snapshot.revision).toBe(0)
+  })
+
+  it('deriveDocumentSnapshot 会为非法 revision 回退到 0', () => {
+    const session = createDraftSession({
+      sessionId: 'revision-default-session',
+    })
+    session.editorSnapshot.revision = 'invalid'
+
+    const snapshot = deriveDocumentSnapshot(session)
+
+    expect(snapshot.revision).toBe(0)
+  })
+
+  it('deriveDocumentSnapshot 会为负数 revision 回退到 0', () => {
+    const session = createDraftSession({
+      sessionId: 'revision-negative-session',
+    })
+    session.editorSnapshot.revision = -1
+
+    const snapshot = deriveDocumentSnapshot(session)
+
+    expect(snapshot.revision).toBe(0)
+  })
+
+  it('新建会话默认是 markdown 类型，并把类型透传到快照', () => {
+    const session = createDraftSession({ sessionId: 'kind-default-session' })
+
+    expect(session.kind).toBe('markdown')
+    expect(deriveDocumentSnapshot(session).kind).toBe('markdown')
+  })
+
+  it('未知会话类型应回退到 markdown，避免渲染层落到没有类型的分支', () => {
+    const session = {
+      ...createDraftSession({ sessionId: 'kind-unknown-session' }),
+      kind: 'pdf',
+    }
+
+    expect(deriveDocumentSnapshot(session).kind).toBe('markdown')
+  })
+
+  it('已绑定文件被外部删除时，标签快照应标记 fileMissing=true，恢复后自动撤回', () => {
+    const session = createBoundFileSession({
+      sessionId: 'bound-file-missing-session',
+      path: 'C:/docs/deleted.md',
+      content: '# 正文',
+    })
+
+    // 绑定成功的初始态：文件在盘上，不能标记为缺失。
+    expect(deriveDocumentTabSnapshot(session).fileMissing).toBe(false)
+
+    // 模拟 watcher 收到 watch.file-missing 后的磁盘基线重置：
+    // 路径身份保留，但 exists 变成 false。
+    session.documentSource.exists = false
+    session.diskSnapshot.exists = false
+
+    const missingTab = deriveDocumentTabSnapshot(session)
+
+    expect(missingTab.fileMissing).toBe(true)
+    // 文件名必须保留真实文件名，删除线才有打在该打的字上。
+    expect(missingTab.fileName).toBe('deleted.md')
+
+    // 文件恢复（或保存成功重新写回磁盘）后，标记必须自动消失，不保留历史。
+    session.documentSource.exists = true
+    session.diskSnapshot.exists = true
+
+    expect(deriveDocumentTabSnapshot(session).fileMissing).toBe(false)
+  })
+
+  it('草稿与 recent-missing 会话的路径身份为空，不能被误标记为 fileMissing', () => {
+    const draftTab = deriveDocumentTabSnapshot(createDraftSession({ sessionId: 'draft-file-missing-session' }))
+    const recentMissingTab = deriveDocumentTabSnapshot(createRecentMissingSession({
+      sessionId: 'recent-missing-file-missing-session',
+      missingPath: 'C:/docs/recent-missing.md',
+    }))
+
+    // 两者的 documentSource.path 都是 null，缺失语义分别由草稿与 isRecentMissing 表达。
+    expect(draftTab.fileMissing).toBe(false)
+    expect(recentMissingTab.fileMissing).toBe(false)
+    expect(recentMissingTab.isRecentMissing).toBe(true)
+  })
+
+  it('外部变更未决时，标签快照应标记 hasPendingExternalChange=true，裁决后回到 false', () => {
+    const session = createBoundFileSession({
+      sessionId: 'bound-file-external-change-session',
+      path: 'C:/docs/external.md',
+      content: '# 正文',
+    })
+
+    expect(deriveDocumentTabSnapshot(session).hasPendingExternalChange).toBe(false)
+
+    // 模拟 prompt 策略下的挂起变更：磁盘上有新版本，等用户裁决。
+    session.externalRuntime.pendingExternalChange = {
+      version: 1,
+      versionHash: 'external-hash',
+      diskContent: '# 磁盘版本',
+      diskStat: null,
+      detectedAt: 1700000000030,
+      watchBindingToken: 1,
+      watchingPath: 'C:/docs/external.md',
+      comparablePath: 'c:/docs/external.md',
+    }
+
+    expect(deriveDocumentTabSnapshot(session).hasPendingExternalChange).toBe(true)
+
+    // markResolved 的效果：用户应用或忽略后挂起项被清空，标记必须自动消失。
+    session.externalRuntime.pendingExternalChange = null
+
+    expect(deriveDocumentTabSnapshot(session).hasPendingExternalChange).toBe(false)
+  })
+})

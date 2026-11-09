@@ -1,0 +1,44 @@
+import { createPinia } from 'pinia'
+import { createApp } from 'vue'
+
+import eventUtil from '@/util/channel/eventUtil.js'
+import commonUtil from '@/util/commonUtil.js'
+import App from './App.vue'
+import i18n from './i18n'
+import router from './router'
+import '@/assets/style/reset.css'
+import '@/assets/style/common.scss'
+import 'virtual:uno.css'
+import 'ant-design-vue/dist/reset.css'
+import 'katex/dist/katex.min.css'
+import '@/assets/style/scroll.scss'
+import '@/assets/style/completion.scss'
+import '@/assets/style/sash.scss'
+import '@/assets/style/wj-markdown-it-container.scss'
+import '@/assets/style/wj-markdown-it-text-color.scss'
+// 代码主题改为按需动态加载，详见 codeThemeUtil.js
+// 预览主题
+import '@/assets/style/preview-theme/preview-theme.scss'
+import '@/assets/style/code-block/code-block-base.scss'
+import '@/assets/style/antd.scss'
+// markdown-it-github-alerts
+import 'markdown-it-github-alerts/styles/github-base.css'
+
+import 'markdown-it-github-alerts/styles/github-colors-light.css'
+
+import '@/assets/style/search.scss'
+import '@/assets/style/global-theme/global-theme.scss'
+import '@/assets/style/colorpicker.scss'
+import '@/assets/style/codemirror.scss'
+
+const app = createApp(App)
+
+app.use(createPinia())
+app.use(router)
+app.use(i18n)
+app.mount('#app')
+
+commonUtil.initMessageConfig()
+commonUtil.initCopyCode()
+eventUtil.link()
+eventUtil.on()

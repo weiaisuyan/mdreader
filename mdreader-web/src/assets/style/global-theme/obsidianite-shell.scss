@@ -1,0 +1,163 @@
+/* ============================================================
+   Obsidianite 外壳配色补丁
+   dark.scss 只负责 11 个 --wj-markdown-* 变量；这里补上那些
+   在组件里写死了颜色的地方（文件栏选中蓝、标签栏、CodeMirror
+   硬编码的 #282c34、滚动条、分隔条），让外壳与预览区一致。
+   ============================================================ */
+
+/* index.html 内联样式把 html/body 写死成 #282c34，这里覆盖 */
+:root[theme='dark'],
+:root[theme='dark'] body {
+  background-color: #100e17;
+}
+
+/* 菜单栏 / 顶部工具条：压暗到 titlebar 色 */
+:root[theme='dark'] .app-menubar,
+:root[theme='dark'] .wj-titlebar {
+  background-color: #0d0b12;
+}
+
+/* 侧边栏：与预览区同一底色，靠一条极淡的青色分隔线收边 */
+:root[theme='dark'] .sidebar-panel {
+  background-color: #100e17;
+  border-right: 1px solid rgba(14, 210, 247, 0.08);
+}
+
+/* 侧栏上方的标签切换按钮 */
+:root[theme='dark'] .sidebar-panel__tabs {
+  background-color: #0d0b12;
+  border-bottom-color: rgba(14, 210, 247, 0.1);
+}
+
+:root[theme='dark'] .sidebar-panel__tab {
+  color: #8b8794;
+  border-radius: 4px;
+}
+
+:root[theme='dark'] .sidebar-panel__tab:hover {
+  background-color: rgba(15, 182, 214, 0.1);
+  color: #bebebe;
+}
+
+:root[theme='dark'] .sidebar-panel__tab--active,
+:root[theme='dark'] .sidebar-panel__tab[data-active='true'] {
+  background-color: rgba(15, 182, 214, 0.11);
+  color: #0fb6d6;
+}
+
+/* 外壳里的滚动条 */
+:root[theme='dark'] ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+:root[theme='dark'] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[theme='dark'] ::-webkit-scrollbar-thumb {
+  background: rgba(14, 210, 247, 0.16);
+  border-radius: 5px;
+}
+
+:root[theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(14, 210, 247, 0.32);
+}
+
+/* 分栏拖拽条 */
+:root[theme='dark'] .splitpanes__splitter,
+:root[theme='dark'] [data-split-gutter] {
+  background-color: #0d0b12;
+}
+
+:root[theme='dark'] .splitpanes__splitter:hover,
+:root[theme='dark'] [data-split-gutter]:hover {
+  background-color: #0fb6d6;
+}
+
+/* 全局选中色 */
+:root[theme='dark'] ::selection {
+  background: rgba(14, 210, 247, 0.3);
+}
+
+/* ---------- 文件栏：选中态要收敛 ---------- */
+/* 原版选中项用 antd 亮蓝 #1677ff，暗底上太刺眼；换成柔和的浅青 + 极淡底色 */
+:root[theme='dark'] .file-manager-panel__entry.is-active,
+:root[theme='dark'] .file-manager-panel__entry.is-active .file-manager-panel__entry-name {
+  background-color: rgba(15, 182, 214, 0.09);
+  color: #6bcafb;
+}
+
+:root[theme='dark'] .file-manager-panel__entry.is-active .file-manager-panel__entry-icon {
+  background-color: #6bcafb;
+}
+
+:root[theme='dark'] .file-manager-panel__entry:hover:not(.is-active) {
+  background-color: rgba(157, 153, 171, 0.1);
+}
+
+/* 文件类型图标（mask 图标，background-color 就是图标颜色） */
+:root[theme='dark'] .file-manager-panel__entry-icon.i-tabler\:markdown {
+  background-color: #0fb6d6;
+}
+
+/* ---------- 文档标签栏 ---------- */
+:root[theme='dark'] .document-tab {
+  color: #8b8794;
+  background-color: transparent;
+}
+
+:root[theme='dark'] .document-tab:hover {
+  background-color: rgba(157, 153, 171, 0.1);
+  color: #bebebe;
+}
+
+:root[theme='dark'] .document-tab[data-active='true'] {
+  background-color: #191621;
+  color: #d7d7d7;
+  box-shadow: inset 0 -1px 0 0 #0fb6d6;
+}
+
+/**
+ * 非焦点栏里「已经打开、但不是我正在看」的标签：横条改成灰色。
+ *
+ * 目的：一眼分出三种状态 ——
+ * 青色横条 = 我正在看的；灰色横条 = 在别的栏里开着；没有横条 = 没打开。
+ * 用 `data-pane-focused` 而不是靠 hover 判断，鼠标移开也不会误导。
+ */
+:root[theme='dark'] .document-tab[data-active='true'][data-pane-focused='false'] {
+  background-color: #171420;
+  color: #9c98a6;
+  box-shadow: inset 0 -1px 0 0 rgba(190, 190, 190, 0.38);
+}
+
+/* ---------- 编辑器（源码模式）与预览区同底色 ---------- */
+:root[theme='dark'] .cm-editor,
+:root[theme='dark'] .cm-editor .cm-content,
+:root[theme='dark'] .cm-editor .cm-scroller {
+  background-color: #100e17;
+}
+
+:root[theme='dark'] .cm-editor .cm-gutters {
+  background-color: #0d0b12;
+  border-right: 1px solid rgba(14, 210, 247, 0.08);
+  color: #6f6b7d;
+}
+
+:root[theme='dark'] .cm-editor .cm-activeLine {
+  background-color: rgba(15, 182, 214, 0.06);
+}
+
+:root[theme='dark'] .cm-editor .cm-activeLineGutter {
+  background-color: rgba(15, 182, 214, 0.08);
+  color: #bebebe;
+}
+
+:root[theme='dark'] .cm-editor .cm-cursor {
+  border-left-color: #0fb6d6;
+}
+
+:root[theme='dark'] .cm-editor .cm-selectionBackground,
+:root[theme='dark'] .cm-editor .cm-content ::selection {
+  background-color: rgba(14, 210, 247, 0.22);
+}

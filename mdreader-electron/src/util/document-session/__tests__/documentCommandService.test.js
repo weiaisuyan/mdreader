@@ -1,0 +1,3069 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { createDocumentCommandService } from '../documentCommandService.js'
+import { createBoundFileSession, createDraftSession } from '../documentSessionFactory.js'
+import { createDocumentSessionStore } from '../documentSessionStore.js'
+import { createSaveCoordinator } from '../saveCoordinator.js'
+
+const { createIdMock } = vi.hoisted(() => {
+  return {
+    createIdMock: vi.fn(),
+  }
+})
+
+vi.mock('../../commonUtil.js', () => {
+  return {
+    default: {
+      createId: createIdMock,
+    },
+  }
+})
+
+function createTestContext(config = []) {
+  const normalizedConfig = Array.isArray(config)
+    ? { autoSave: config }
+    : { autoSave: [], ...config }
+  const store = createDocumentSessionStore()
+  const saveCoordinator = createSaveCoordinator()
+  const service = createDocumentCommandService({
+    store,
+    saveCoordinator,
+    getConfig: () => ({
+      ...normalizedConfig,
+    }),
+  })
+
+  return {
+    store,
+    service,
+  }
+}
+
+function bindSession(store, session, windowId = 1001) {
+  store.createSession(session)
+  store.bindWindowToSession({
+    windowId,
+    sessionId: session.sessionId,
+  })
+  return windowId
+}
+
+describe('documentCommandService', () => {
+  beforeEach(() => {
+    let jobIndex = 1
+    createIdMock.mockReset()
+    createIdMock.mockImplementation(() => `job-${jobIndex++}`)
+    vi.useFakeTimers()
+    vi.setSystemTime(1700000002000)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('window.blur 触发自动保存时，必须走统一保存管线且 trigger=blur-auto-save，并且不发送成功提示', () => {
+    const { store, service } = createTestContext(['blur'])
+    const session = createBoundFileSession({
+      sessionId: 'blur-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002001,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# blur 自动保存内容',
+      },
+    })
+
+    const blurRequested = service.dispatch({
+      windowId,
+      command: 'window.blur',
+    })
+
+    expect(blurRequested.effects).toEqual([
+      {
+        type: 'execute-save',
+        job: expect.objectContaining({
+          trigger: 'blur-auto-save',
+          content: '# blur 自动保存内容',
+        }),
+      },
+    ])
+
+    const blurSaveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# blur 自动保存内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'blur-auto-save',
+        savedAt: 1700000002002,
+        stat: null,
+      },
+    })
+
+    expect(blurSaveSucceeded.effects.find(effect => effect.type === 'show-message')).toBeUndefined()
+  })
+
+  it('document.edit 命中相同内容时必须走 no-op，不能继续推进 revision 或 requestedRevision', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'document-edit-noop-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002001,
+    })
+    const windowId = bindSession(store, session)
+
+    const firstEdited = service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 最终内容',
+      },
+    })
+    const firstUpdatedAt = firstEdited.session.editorSnapshot.updatedAt
+
+    vi.setSystemTime(1700000002002)
+    const secondEdited = service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 最终内容',
+      },
+    })
+
+    expect(firstEdited.snapshot.revision).toBe(1)
+    expect(firstEdited.session.saveRuntime.requestedRevision).toBe(1)
+    expect(secondEdited.snapshot.content).toBe('# 最终内容')
+    expect(secondEdited.snapshot.revision).toBe(1)
+    expect(secondEdited.session.editorSnapshot.updatedAt).toBe(firstUpdatedAt)
+    expect(secondEdited.session.saveRuntime.requestedRevision).toBe(1)
+  })
+
+  it('blur-auto-save 进行中收到 document.save 时，当前 save 失败通知必须升级为 manual-save', () => {
+    const { store, service } = createTestContext(['blur'])
+    const session = createBoundFileSession({
+      sessionId: 'manual-save-should-upgrade-current-auto-save-failure-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002003,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# blur 自动保存内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'window.blur',
+    })
+
+    const manualSaveRequested = service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    expect(manualSaveRequested.effects).toEqual([])
+    expect(manualSaveRequested.session.saveRuntime.trigger).toBe('manual-save')
+
+    const saveFailed = service.dispatch({
+      windowId,
+      command: 'save.failed',
+      payload: {
+        jobId: 'job-1',
+        trigger: 'blur-auto-save',
+        error: new Error('磁盘写入失败'),
+      },
+    })
+
+    expect(saveFailed.effects).toContainEqual({
+      type: 'notify-save-failed',
+      trigger: 'manual-save',
+      error: {
+        name: 'Error',
+        message: '磁盘写入失败',
+      },
+    })
+  })
+
+  it('blur-auto-save 进行中收到 document.save 后，如果保存期间又有新编辑，后续补写必须沿用 manual-save', () => {
+    const { store, service } = createTestContext(['blur'])
+    const session = createBoundFileSession({
+      sessionId: 'manual-save-should-upgrade-follow-up-save-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002004,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 第一版内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'window.blur',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 第二版内容',
+      },
+    })
+
+    const saveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 第一版内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'blur-auto-save',
+        savedAt: 1700000002005,
+        stat: null,
+      },
+    })
+
+    expect(saveSucceeded.effects).toContainEqual({
+      type: 'execute-save',
+      job: expect.objectContaining({
+        jobId: 'job-2',
+        trigger: 'manual-save',
+        revision: 2,
+        content: '# 第二版内容',
+      }),
+    })
+  })
+
+  it('copy-save.succeeded / copy-save.failed 必须作为标准结果命令回流命令层，而不是旁路返回给 renderer', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'copy-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002010,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 副本内容',
+      },
+    })
+
+    const copyRequested = service.dispatch({
+      windowId,
+      command: 'document.save-copy',
+    })
+    const copySelected = service.dispatch({
+      windowId,
+      command: 'dialog.copy-target-selected',
+      payload: {
+        path: 'C:/docs/demo-copy.md',
+      },
+    })
+    const copySucceeded = service.dispatch({
+      windowId,
+      command: 'copy-save.succeeded',
+      payload: {
+        path: 'C:/docs/demo-copy.md',
+      },
+    })
+    const copyFailed = service.dispatch({
+      windowId,
+      command: 'copy-save.failed',
+      payload: {
+        reason: 'write-failed',
+        path: 'C:/docs/demo-copy.md',
+      },
+    })
+
+    expect(copyRequested.effects).toEqual([
+      expect.objectContaining({
+        type: 'open-copy-dialog',
+        requestId: 'copy-save-request-1',
+      }),
+    ])
+    expect(copySelected.effects).toEqual([
+      {
+        type: 'execute-copy-save',
+        job: expect.objectContaining({
+          path: 'C:/docs/demo-copy.md',
+          content: '# 副本内容',
+        }),
+      },
+    ])
+    expect(copySelected).not.toHaveProperty('copySaveResult')
+    expect(copySucceeded.snapshot.saved).toBe(false)
+    expect(copyFailed.snapshot.saved).toBe(false)
+  })
+
+  it('dialog.copy-target-cancelled 发生后不得改动当前 active session、当前保存态或 watcher 绑定', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'cancel-copy-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002020,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.save-copy',
+    })
+    const cancelled = service.dispatch({
+      windowId,
+      command: 'dialog.copy-target-cancelled',
+    })
+
+    expect(store.getSessionByWindowId(windowId)?.sessionId).toBe('cancel-copy-session')
+    expect(cancelled.snapshot.saved).toBe(true)
+    expect(cancelled.session.watchRuntime.bindingToken).toBe(0)
+  })
+
+  it('save-copy 成功后，当前 active session 的 path、saved、watch 绑定与标题都不变化', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'copy-success-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002021,
+    })
+    session.watchRuntime.bindingToken = 7
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 未保存内容',
+      },
+    })
+
+    service.dispatch({
+      windowId,
+      command: 'document.save-copy',
+    })
+    service.dispatch({
+      windowId,
+      command: 'dialog.copy-target-selected',
+      payload: {
+        path: 'C:/docs/demo-copy.md',
+      },
+    })
+    const copySucceeded = service.dispatch({
+      windowId,
+      command: 'copy-save.succeeded',
+      payload: {
+        path: 'C:/docs/demo-copy.md',
+      },
+    })
+
+    expect(copySucceeded.session.documentSource.path).toBe('C:/docs/demo.md')
+    expect(copySucceeded.session.persistedSnapshot.path).toBe('C:/docs/demo.md')
+    expect(copySucceeded.snapshot.saved).toBe(false)
+    expect(copySucceeded.snapshot.windowTitle).toBe('demo.md')
+    expect(copySucceeded.session.watchRuntime.bindingToken).toBe(7)
+    expect(copySucceeded.session.watchRuntime.watchingPath).toBe('C:/docs/demo.md')
+  })
+
+  it('关闭请求命中 autoSave=close 且已有有效路径时，必须交给 save-all-and-close 统一收口，而不是只保存活动会话', () => {
+    const { store, service } = createTestContext(['close'])
+    const session = createBoundFileSession({
+      sessionId: 'close-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002030,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 关闭前自动保存内容',
+      },
+    })
+
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+
+    expect(closeRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+      {
+        type: 'save-all-and-close',
+      },
+    ])
+    // 保存不再由命令层直接起 job：全部脏标签交给宿主按 sessionId 逐个保存。
+    expect(closeRequested.session.closeRuntime.waitingSaveJobId).toBeNull()
+  })
+
+  it('document.save-and-close 必须复用保存状态机，并在重复点击时只等待同一个 job', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'save-and-close-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002035,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 保存并退出内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+
+    const firstRequested = service.dispatch({
+      windowId,
+      command: 'document.save-and-close',
+    })
+    const repeatedRequested = service.dispatch({
+      windowId,
+      command: 'document.save-and-close',
+    })
+
+    expect(firstRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+      {
+        type: 'execute-save',
+        job: expect.objectContaining({
+          jobId: 'job-1',
+          trigger: 'save-and-close',
+          content: '# 保存并退出内容',
+        }),
+      },
+    ])
+    expect(repeatedRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+    ])
+    expect(repeatedRequested.session.closeRuntime.waitingSaveJobId).toBe('job-1')
+
+    const saved = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 保存并退出内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'save-and-close',
+        savedAt: 1700000002036,
+        stat: null,
+      },
+    })
+
+    expect(saved.effects).toEqual([
+      {
+        type: 'close-window',
+      },
+    ])
+    expect(saved.session.closeRuntime).toEqual({
+      intent: null,
+      promptReason: null,
+      waitingSaveJobId: null,
+      awaitingPathSelection: false,
+      forceClose: false,
+    })
+  })
+
+  it('save-and-close 写盘期间产生新编辑时，必须先补写最新 revision 再关闭', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'save-and-close-follow-up-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002036,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 第一版内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save-and-close',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 第二版内容',
+      },
+    })
+
+    const firstSaved = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 第一版内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'save-and-close',
+        savedAt: 1700000002037,
+        stat: null,
+      },
+    })
+
+    expect(firstSaved.effects).toEqual([
+      {
+        type: 'execute-save',
+        job: expect.objectContaining({
+          jobId: 'job-2',
+          revision: 2,
+          content: '# 第二版内容',
+          trigger: 'save-and-close',
+        }),
+      },
+    ])
+    expect(firstSaved.session.closeRuntime.waitingSaveJobId).toBe('job-2')
+
+    const secondSaved = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-2',
+        revision: 2,
+        content: '# 第二版内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'save-and-close',
+        savedAt: 1700000002038,
+        stat: null,
+      },
+    })
+
+    expect(secondSaved.effects).toEqual([
+      {
+        type: 'close-window',
+      },
+    ])
+  })
+
+  it('document.save-and-close 写盘失败时必须保留关闭提示，不能产出 close-window', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'save-and-close-failed-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002037,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 保存失败内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save-and-close',
+    })
+
+    const failed = service.dispatch({
+      windowId,
+      command: 'save.failed',
+      payload: {
+        jobId: 'job-1',
+        trigger: 'save-and-close',
+        error: new Error('磁盘已满'),
+      },
+    })
+
+    expect(failed.effects).toContainEqual({
+      type: 'notify-save-failed',
+      trigger: 'save-and-close',
+      error: {
+        name: 'Error',
+        message: '磁盘已满',
+      },
+    })
+    expect(failed.effects).toContainEqual({
+      type: 'show-unsaved-prompt',
+    })
+    expect(failed.effects.some(effect => effect.type === 'close-window')).toBe(false)
+    expect(failed.session.closeRuntime.promptReason).toBe('unsaved-changes')
+    expect(failed.session.closeRuntime.waitingSaveJobId).toBeNull()
+  })
+
+  it('用户在 save-and-close 写盘期间取消关闭后，迟到的保存成功也不能再次关闭窗口', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'save-and-close-cancel-race-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002038,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 取消关闭内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save-and-close',
+    })
+    const cancelled = service.dispatch({
+      windowId,
+      command: 'document.cancel-close',
+    })
+
+    const lateSaved = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 取消关闭内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'save-and-close',
+        savedAt: 1700000002039,
+        stat: null,
+      },
+    })
+
+    expect(cancelled.session.closeRuntime.intent).toBeNull()
+    expect(lateSaved.effects).toEqual([])
+    expect(lateSaved.session.closeRuntime.intent).toBeNull()
+    expect(lateSaved.snapshot.saved).toBe(true)
+  })
+
+  it('document.save-and-close 的草稿首存必须先选路径，成功后才允许关闭', () => {
+    const { store, service } = createTestContext([])
+    const session = createDraftSession({
+      sessionId: 'draft-save-and-close-session',
+      now: 1700000002041,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 草稿保存并退出',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+
+    const saveRequested = service.dispatch({
+      windowId,
+      command: 'document.save-and-close',
+    })
+    expect(saveRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+      {
+        type: 'open-save-dialog',
+        trigger: 'save-and-close',
+      },
+    ])
+    expect(saveRequested.session.closeRuntime.awaitingPathSelection).toBe(true)
+
+    const targetSelected = service.dispatch({
+      windowId,
+      command: 'dialog.save-target-selected',
+      payload: {
+        path: 'C:/docs/draft.md',
+      },
+    })
+    expect(targetSelected.effects).toEqual([
+      {
+        type: 'execute-save',
+        job: expect.objectContaining({
+          path: 'C:/docs/draft.md',
+          trigger: 'save-and-close',
+        }),
+      },
+    ])
+    expect(targetSelected.session.closeRuntime.waitingSaveJobId).toBe('job-1')
+
+    const saved = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 草稿保存并退出',
+        path: 'C:/docs/draft.md',
+        trigger: 'save-and-close',
+        savedAt: 1700000002042,
+        stat: null,
+      },
+    })
+    expect(saved.effects).toEqual([
+      {
+        type: 'close-window',
+      },
+    ])
+  })
+
+  it('document.cancel-close 在 save-and-close 等待首存路径时，取消回流不能触发关闭', () => {
+    const { store, service } = createTestContext([])
+    const session = createDraftSession({
+      sessionId: 'draft-save-and-close-cancel-session',
+      now: 1700000002043,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 取消首存',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save-and-close',
+    })
+
+    const cancelled = service.dispatch({
+      windowId,
+      command: 'dialog.save-target-cancelled',
+    })
+
+    expect(cancelled.effects).toEqual([])
+    expect(cancelled.session.closeRuntime.intent).toBeNull()
+    expect(cancelled.session.documentSource.path).toBeNull()
+  })
+
+  it('document.cancel-close 在 save-and-close 写盘期间回退后，迟到的 save.failed 也不能重新弹关闭提示', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'save-and-close-failed-cancel-race-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002044,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 取消后失败',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save-and-close',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.cancel-close',
+    })
+
+    const lateFailed = service.dispatch({
+      windowId,
+      command: 'save.failed',
+      payload: {
+        jobId: 'job-1',
+        trigger: 'save-and-close',
+        error: new Error('用户中止'),
+      },
+    })
+
+    expect(lateFailed.effects).toContainEqual({
+      type: 'notify-save-failed',
+      trigger: 'save-and-close',
+      error: {
+        name: 'Error',
+        message: '用户中止',
+      },
+    })
+    expect(lateFailed.effects.some(effect => effect.type === 'show-unsaved-prompt')).toBe(false)
+    expect(lateFailed.effects.some(effect => effect.type === 'close-window')).toBe(false)
+    expect(lateFailed.session.closeRuntime.intent).toBeNull()
+  })
+
+  it('document.cancel-close 会清空 closeRuntime 并回到继续编辑态', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'cancel-close-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002040,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 未保存内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    const cancelled = service.dispatch({
+      windowId,
+      command: 'document.cancel-close',
+    })
+
+    expect(cancelled.session.closeRuntime).toEqual({
+      intent: null,
+      promptReason: null,
+      waitingSaveJobId: null,
+      awaitingPathSelection: false,
+      forceClose: false,
+    })
+    expect(cancelled.snapshot.saved).toBe(false)
+  })
+
+  it('document.confirm-force-close 会把 forceClose=true 并允许窗口立即关闭', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'force-close-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002050,
+    })
+    const windowId = bindSession(store, session)
+
+    const confirmed = service.dispatch({
+      windowId,
+      command: 'document.confirm-force-close',
+    })
+
+    expect(confirmed.session.closeRuntime.forceClose).toBe(true)
+    expect(confirmed.effects).toEqual([
+      {
+        type: 'close-window',
+      },
+    ])
+  })
+
+  it('关闭请求发生时如果已有 in-flight save 且已覆盖当前 revision，应等待已有 job，而不是重复起并发保存', () => {
+    const { store, service } = createTestContext(['close'])
+    const session = createBoundFileSession({
+      sessionId: 'wait-job-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002060,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 第一版内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+
+    expect(closeRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+    ])
+    expect(closeRequested.session.closeRuntime.waitingSaveJobId).toBe('job-1')
+  })
+
+  it('即使当前 dirty=false，只要已有 in-flight save，关闭请求也必须先等待 waitingSaveJobId，而不是直接关闭', () => {
+    const { store, service } = createTestContext(['close'])
+    const session = createBoundFileSession({
+      sessionId: 'close-wait-even-clean-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002065,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 第一版内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    // 这里故意把磁盘基线改成与编辑态一致，模拟“当前 dirty=false，但已有 save job 仍在飞行中”。
+    // reviewer 指出的 blocker 正是：这种情况下不能因为 dirty=false 就绕过等待矩阵直接关闭。
+    const inFlightSession = store.getSessionByWindowId(windowId)
+    inFlightSession.diskSnapshot.content = '# 第一版内容'
+    inFlightSession.diskSnapshot.exists = true
+
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+
+    expect(closeRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+    ])
+    expect(closeRequested.session.closeRuntime.waitingSaveJobId).toBe('job-1')
+  })
+
+  it('关闭请求发生时如果已有 in-flight save 但未覆盖当前最新 revision，应等待已有 job 后补写最新 revision', () => {
+    const { store, service } = createTestContext(['close'])
+    const session = createBoundFileSession({
+      sessionId: 'close-matrix-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002070,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 第一版内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 第二版内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+
+    const firstSaveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 第一版内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'manual-save',
+        savedAt: 1700000002071,
+        stat: null,
+      },
+    })
+
+    expect(firstSaveSucceeded.effects).toEqual([
+      {
+        type: 'execute-save',
+        job: expect.objectContaining({
+          jobId: 'job-2',
+          revision: 2,
+          trigger: 'close-auto-save',
+        }),
+      },
+    ])
+    expect(firstSaveSucceeded.session.closeRuntime.waitingSaveJobId).toBe('job-2')
+
+    const secondSaveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-2',
+        revision: 2,
+        content: '# 第二版内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'close-auto-save',
+        savedAt: 1700000002072,
+        stat: null,
+      },
+    })
+
+    expect(secondSaveSucceeded.effects).toEqual([
+      {
+        type: 'close-window',
+      },
+    ])
+  })
+
+  it('关闭链路等待 manual-save 结果时，如果 watcher 已先观测到外部版本，save.succeeded 不得继续关闭窗口', () => {
+    const { store, service } = createTestContext({
+      autoSave: ['close'],
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'close-after-manual-save-with-external-change-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002073,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 本地保存内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    const waitingSaveJobId = closeRequested.session.closeRuntime.waitingSaveJobId
+    const watched = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002074,
+        diskContent: '# 外部版本',
+        diskStat: {
+          mtimeMs: 1700000002074,
+        },
+      },
+    })
+    const pendingVersionHash = watched.session.externalRuntime.pendingExternalChange?.versionHash
+
+    const saveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 本地保存内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'manual-save',
+        savedAt: 1700000002075,
+        stat: {
+          mtimeMs: 1700000002075,
+        },
+      },
+    })
+
+    expect(waitingSaveJobId).toBe('job-1')
+    expect(saveSucceeded.effects.find(effect => effect.type === 'close-window')).toBeUndefined()
+    expect(saveSucceeded.effects).toContainEqual({
+      type: 'show-unsaved-prompt',
+    })
+    expect(saveSucceeded.snapshot.saved).toBe(false)
+    expect(saveSucceeded.snapshot.dirty).toBe(true)
+    expect(saveSucceeded.snapshot.closePrompt).toEqual({
+      visible: true,
+      reason: 'unsaved-changes',
+      allowForceClose: true,
+      scope: 'window',
+      unsavedTabCount: 1,
+    })
+    expect(saveSucceeded.snapshot.externalPrompt).toMatchObject({
+      version: 1,
+      externalContent: '# 外部版本',
+    })
+    expect(saveSucceeded.session.diskSnapshot.content).toBe('# 外部版本')
+    expect(saveSucceeded.session.diskSnapshot.versionHash).toBe(pendingVersionHash)
+    expect(saveSucceeded.session.closeRuntime).toEqual({
+      intent: 'close',
+      promptReason: 'unsaved-changes',
+      waitingSaveJobId: null,
+      awaitingPathSelection: false,
+      forceClose: false,
+    })
+  })
+
+  it('close-auto-save 遇到保存期间外部变更时，save.succeeded 不得继续关闭窗口', () => {
+    const { store, service } = createTestContext({
+      autoSave: ['close'],
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'close-auto-save-with-external-change-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002076,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 关闭前自动保存内容',
+      },
+    })
+    // 先手动作一次保存，让关闭链路有一个可等待的 in-flight job。
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    const watched = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002077,
+        diskContent: '# 外部版本',
+        diskStat: {
+          mtimeMs: 1700000002077,
+        },
+      },
+    })
+    const pendingVersionHash = watched.session.externalRuntime.pendingExternalChange?.versionHash
+
+    const saveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 关闭前自动保存内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'close-auto-save',
+        savedAt: 1700000002078,
+        stat: {
+          mtimeMs: 1700000002078,
+        },
+      },
+    })
+
+    // 已有 in-flight 保存时，关闭链路只挂等待，不再另起保存任务。
+    expect(closeRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+    ])
+    expect(saveSucceeded.effects.find(effect => effect.type === 'close-window')).toBeUndefined()
+    expect(saveSucceeded.effects).toContainEqual({
+      type: 'show-unsaved-prompt',
+    })
+    expect(saveSucceeded.snapshot.saved).toBe(false)
+    expect(saveSucceeded.snapshot.externalPrompt).toMatchObject({
+      version: 1,
+      externalContent: '# 外部版本',
+    })
+    expect(saveSucceeded.session.diskSnapshot.content).toBe('# 外部版本')
+    expect(saveSucceeded.session.diskSnapshot.versionHash).toBe(pendingVersionHash)
+    expect(saveSucceeded.session.closeRuntime).toEqual({
+      intent: 'close',
+      promptReason: 'unsaved-changes',
+      waitingSaveJobId: null,
+      awaitingPathSelection: false,
+      forceClose: false,
+    })
+  })
+
+  it('关闭链路等待中的 save 若已无须补写且当前内容已收敛到 watcher 外部版本，仍应正常关闭窗口', () => {
+    const { store, service } = createTestContext({
+      autoSave: ['close'],
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'close-after-save-already-converged-to-external-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002079,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 本地保存内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002080,
+        diskContent: '# 外部版本',
+        diskStat: {
+          mtimeMs: 1700000002080,
+        },
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 外部版本',
+      },
+    })
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    const waitingSaveJobId = closeRequested.session.closeRuntime.waitingSaveJobId
+
+    const saveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 本地保存内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'manual-save',
+        savedAt: 1700000002081,
+        stat: {
+          mtimeMs: 1700000002081,
+        },
+      },
+    })
+
+    expect(waitingSaveJobId).toBe('job-1')
+    expect(saveSucceeded.effects).toEqual([
+      {
+        type: 'close-window',
+      },
+    ])
+    expect(saveSucceeded.snapshot.saved).toBe(true)
+    expect(saveSucceeded.snapshot.dirty).toBe(false)
+    expect(saveSucceeded.snapshot.externalPrompt).toBeNull()
+    expect(saveSucceeded.session.closeRuntime).toEqual({
+      intent: null,
+      promptReason: null,
+      waitingSaveJobId: null,
+      awaitingPathSelection: false,
+      forceClose: false,
+    })
+  })
+
+  it('未命名草稿在开启关闭自动保存时，也必须回落到未保存确认弹窗，不得弹系统保存对话框', () => {
+    const { store, service } = createTestContext(['close'])
+    const session = createDraftSession({
+      sessionId: 'draft-close-session',
+      now: 1700000002080,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 草稿内容',
+      },
+    })
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+
+    // 自动保存流程一旦弹出系统对话框就不再是“自动”了：
+    // 草稿属于“不能替用户决定”的情形，必须由用户在确认弹窗里选保存还是丢弃。
+    expect(closeRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+      {
+        type: 'show-unsaved-prompt',
+      },
+    ])
+    expect(closeRequested.session.documentSource.path).toBeNull()
+    expect(closeRequested.snapshot.closePrompt).toMatchObject({
+      visible: true,
+      scope: 'window',
+      reason: 'unsaved-changes',
+    })
+  })
+
+  it('存在未决外部变更时，关闭自动保存必须回落到未保存确认弹窗，不能覆盖外部修改', () => {
+    const { store, service } = createTestContext(['close'])
+    const session = createBoundFileSession({
+      sessionId: 'external-pending-close-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002083,
+    })
+    // 外部变更未决 = “谁的内容该赢”还没被用户裁决过。
+    session.externalRuntime.pendingExternalChange = { version: 2 }
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 本地修改',
+      },
+    })
+
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+
+    expect(closeRequested.effects).toEqual([
+      {
+        type: 'hold-window-close',
+      },
+      {
+        type: 'show-unsaved-prompt',
+      },
+    ])
+    expect(closeRequested.snapshot.closePrompt).toMatchObject({
+      visible: true,
+      scope: 'window',
+      reason: 'unsaved-changes',
+    })
+  })
+
+  it('草稿手动保存时，即使带了 payload.path，document.save 首次也必须先产出 open-save-dialog，不能直接 execute-save', () => {
+    const { store, service } = createTestContext([])
+    const session = createDraftSession({
+      sessionId: 'draft-manual-save-with-path-session',
+      now: 1700000002084,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 草稿内容',
+      },
+    })
+
+    const saveRequested = service.dispatch({
+      windowId,
+      command: 'document.save',
+      payload: {
+        path: 'C:/docs/draft-from-compat.md',
+      },
+    })
+
+    expect(saveRequested.effects).toEqual([
+      {
+        type: 'open-save-dialog',
+        trigger: 'manual-save',
+      },
+    ])
+    expect(saveRequested.effects.find(effect => effect.type === 'execute-save')).toBeUndefined()
+
+    const targetSelected = service.dispatch({
+      windowId,
+      command: 'dialog.save-target-selected',
+      payload: {
+        path: 'C:/docs/draft-from-compat.md',
+      },
+    })
+
+    expect(targetSelected.effects).toEqual([
+      {
+        type: 'execute-save',
+        job: expect.objectContaining({
+          path: 'C:/docs/draft-from-compat.md',
+          trigger: 'manual-save',
+        }),
+      },
+    ])
+  })
+
+  it('草稿首次保存已进入 in-flight save 后，再次 document.save 不得再次弹 open-save-dialog', () => {
+    const { store, service } = createTestContext([])
+    const session = createDraftSession({
+      sessionId: 'draft-save-in-flight-session',
+      now: 1700000002085,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 草稿内容',
+      },
+    })
+
+    const firstSaveRequested = service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    const firstPathSelected = service.dispatch({
+      windowId,
+      command: 'dialog.save-target-selected',
+      payload: {
+        path: 'C:/docs/draft.md',
+      },
+    })
+    const secondSaveRequested = service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    expect(firstSaveRequested.effects).toEqual([
+      {
+        type: 'open-save-dialog',
+        trigger: 'manual-save',
+      },
+    ])
+    expect(firstPathSelected.effects).toEqual([
+      {
+        type: 'execute-save',
+        job: expect.objectContaining({
+          jobId: 'job-1',
+          path: 'C:/docs/draft.md',
+          trigger: 'manual-save',
+        }),
+      },
+    ])
+    expect(secondSaveRequested.effects.find(effect => effect.type === 'open-save-dialog')).toBeUndefined()
+    expect(secondSaveRequested.session.saveRuntime.inFlightJobId).toBe('job-1')
+    expect(secondSaveRequested.session.saveRuntime.status).toBe('queued')
+  })
+
+  it('首次保存已经进入 in-flight save 后，迟到的 dialog.save-target-cancelled 不得污染 saveRuntime 或触发未保存确认', () => {
+    const { store, service } = createTestContext([])
+    const session = createDraftSession({
+      sessionId: 'draft-stale-cancel-command-session',
+      now: 1700000002086,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 草稿内容',
+      },
+    })
+
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    const pathSelected = service.dispatch({
+      windowId,
+      command: 'dialog.save-target-selected',
+      payload: {
+        path: 'C:/docs/draft.md',
+      },
+    })
+    const staleCancelled = service.dispatch({
+      windowId,
+      command: 'dialog.save-target-cancelled',
+    })
+
+    expect(pathSelected.session.saveRuntime.inFlightJobId).toBe('job-1')
+    expect(staleCancelled.effects.find(effect => effect.type === 'show-unsaved-prompt')).toBeUndefined()
+    expect(staleCancelled.session.saveRuntime.inFlightJobId).toBe('job-1')
+    expect(staleCancelled.session.saveRuntime.status).toBe('queued')
+    expect(staleCancelled.session.saveRuntime.trigger).toBe('manual-save')
+  })
+
+  it('普通 save 进行中触发 save-copy，再收到 copy-save 结果时，不得改写当前 saveRuntime', () => {
+    const { store, service } = createTestContext([])
+    const session = createBoundFileSession({
+      sessionId: 'copy-with-save-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002090,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 当前内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save-copy',
+    })
+    service.dispatch({
+      windowId,
+      command: 'dialog.copy-target-selected',
+      payload: {
+        path: 'C:/docs/demo-copy.md',
+      },
+    })
+
+    const copySucceeded = service.dispatch({
+      windowId,
+      command: 'copy-save.succeeded',
+      payload: {
+        path: 'C:/docs/demo-copy.md',
+      },
+    })
+
+    expect(copySucceeded.session.saveRuntime.inFlightJobId).toBe('job-1')
+    expect(copySucceeded.session.saveRuntime.status).toBe('queued')
+  })
+
+  it('close-auto-save 发出后如果用户取消关闭，迟到的 save.succeeded 不得再继续关闭窗口', () => {
+    const { store, service } = createTestContext(['close'])
+    const session = createBoundFileSession({
+      sessionId: 'cancel-close-after-save-started-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002100,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 关闭前自动保存内容',
+      },
+    })
+    // 先用手动保存造出一个 in-flight job，再发起关闭：
+    // 关闭链路必须先挂到已有保存任务上等待，而不是另起一个。
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    const closeRequested = service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    const waitingSaveJobId = closeRequested.session.closeRuntime.waitingSaveJobId
+    const cancelled = service.dispatch({
+      windowId,
+      command: 'document.cancel-close',
+    })
+    const lateSaveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 关闭前自动保存内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'close-auto-save',
+        savedAt: 1700000002101,
+        stat: null,
+      },
+    })
+
+    expect(waitingSaveJobId).toBe('job-1')
+    expect(cancelled.session.closeRuntime).toEqual({
+      intent: null,
+      promptReason: null,
+      waitingSaveJobId: null,
+      awaitingPathSelection: false,
+      forceClose: false,
+    })
+    expect(lateSaveSucceeded.effects.find(effect => effect.type === 'close-window')).toBeUndefined()
+    expect(lateSaveSucceeded.effects.find(effect => effect.type === 'show-unsaved-prompt')).toBeUndefined()
+    expect(lateSaveSucceeded.session.closeRuntime).toEqual({
+      intent: null,
+      promptReason: null,
+      waitingSaveJobId: null,
+      awaitingPathSelection: false,
+      forceClose: false,
+    })
+  })
+
+  it('close-auto-save 发出后如果用户取消关闭，迟到的 save.failed 不得再重新进入未保存确认态', () => {
+    const { store, service } = createTestContext(['close'])
+    const session = createBoundFileSession({
+      sessionId: 'cancel-close-after-save-failed-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002110,
+    })
+    const windowId = bindSession(store, session)
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 关闭前自动保存内容',
+      },
+    })
+    // 同上：先手动保存造出 in-flight job，关闭链路才会挂上去等待。
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.request-close',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.cancel-close',
+    })
+
+    const lateSaveFailed = service.dispatch({
+      windowId,
+      command: 'save.failed',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 关闭前自动保存内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'close-auto-save',
+        error: new Error('disk full'),
+      },
+    })
+
+    expect(lateSaveFailed.effects).toContainEqual({
+      type: 'notify-save-failed',
+      trigger: 'close-auto-save',
+      error: {
+        name: 'Error',
+        message: 'disk full',
+      },
+    })
+    expect(lateSaveFailed.effects.find(effect => effect.type === 'close-window')).toBeUndefined()
+    expect(lateSaveFailed.effects.find(effect => effect.type === 'show-unsaved-prompt')).toBeUndefined()
+    expect(lateSaveFailed.session.closeRuntime).toEqual({
+      intent: null,
+      promptReason: null,
+      waitingSaveJobId: null,
+      awaitingPathSelection: false,
+      forceClose: false,
+    })
+  })
+
+  it('watch.file-changed 在 prompt 模式下创建 pending 后，继续 document.edit 也不能清掉外部待处理项', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'watch-prompt-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002120,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    const watched = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002121,
+        diskContent: '# 外部版本 1',
+        diskStat: {
+          mtimeMs: 1700000002121,
+        },
+      },
+    })
+    const edited = service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 用户继续编辑',
+      },
+    })
+
+    expect(watched.snapshot.externalPrompt).toEqual({
+      visible: true,
+      version: 1,
+      localContent: '# 原始内容',
+      externalContent: '# 外部版本 1',
+      fileName: 'demo.md',
+    })
+    expect(edited.snapshot.externalPrompt).toEqual({
+      visible: true,
+      version: 1,
+      localContent: '# 用户继续编辑',
+      externalContent: '# 外部版本 1',
+      fileName: 'demo.md',
+    })
+    expect(edited.session.externalRuntime.pendingExternalChange).toMatchObject({
+      version: 1,
+      diskContent: '# 外部版本 1',
+      watchBindingToken: 1,
+    })
+  })
+
+  it('watch.file-changed 在 apply 模式下必须自动应用磁盘内容，而不是创建 pendingExternalChange', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'apply',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'watch-apply-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002130,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 本地未保存内容',
+      },
+    })
+
+    const watched = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002131,
+        diskContent: '# 外部最新内容',
+        diskStat: {
+          mtimeMs: 1700000002131,
+        },
+      },
+    })
+
+    expect(watched.snapshot.content).toBe('# 外部最新内容')
+    expect(watched.snapshot.saved).toBe(true)
+    expect(watched.snapshot.externalPrompt).toBeNull()
+    expect(watched.session.externalRuntime.pendingExternalChange).toBeNull()
+    expect(watched.session.externalRuntime.lastResolutionResult).toBe('applied')
+    expect(watched.session.externalRuntime.lastHandledVersionHash)
+      .toBe(watched.session.diskSnapshot.versionHash)
+  })
+
+  it('document.external.apply / document.external.ignore 必须通过命令层更新外部修改审计字段', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'watch-external-command-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002140,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 用户本地内容',
+      },
+    })
+
+    service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002141,
+        diskContent: '# 外部版本 1',
+        diskStat: {
+          mtimeMs: 1700000002141,
+        },
+      },
+    })
+    const ignored = service.dispatch({
+      windowId,
+      command: 'document.external.ignore',
+    })
+
+    expect(ignored.snapshot.content).toBe('# 用户本地内容')
+    expect(ignored.snapshot.externalPrompt).toBeNull()
+    expect(ignored.session.externalRuntime.lastResolutionResult).toBe('ignored')
+    expect(ignored.session.externalRuntime.lastHandledVersionHash).toBeTruthy()
+
+    service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002142,
+        diskContent: '# 外部版本 2',
+        diskStat: {
+          mtimeMs: 1700000002142,
+        },
+      },
+    })
+    const applied = service.dispatch({
+      windowId,
+      command: 'document.external.apply',
+    })
+
+    expect(applied.snapshot.content).toBe('# 外部版本 2')
+    expect(applied.snapshot.saved).toBe(true)
+    expect(applied.snapshot.externalPrompt).toBeNull()
+    expect(applied.session.externalRuntime.lastResolutionResult).toBe('applied')
+    expect(applied.session.externalRuntime.lastHandledVersionHash)
+      .toBe(applied.session.diskSnapshot.versionHash)
+  })
+
+  it('document.external.apply / document.external.ignore 遇到 stale prompt version 时，命令层必须保持当前 pending 不变', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'watch-external-stale-version-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002143,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+    session.externalRuntime.lastResolutionResult = 'ignored'
+    session.externalRuntime.lastHandledVersionHash = 'handled-before'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 用户本地内容',
+      },
+    })
+
+    service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002144,
+        diskContent: '# 外部版本 1',
+        diskStat: {
+          mtimeMs: 1700000002144,
+        },
+      },
+    })
+    const latestPending = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002145,
+        diskContent: '# 外部版本 2',
+        diskStat: {
+          mtimeMs: 1700000002145,
+        },
+      },
+    })
+    const beforeStaleActionPrompt = latestPending.snapshot.externalPrompt
+    const beforeStaleActionResolutionResult = latestPending.session.externalRuntime.lastResolutionResult
+    const beforeStaleActionHandledVersionHash = latestPending.session.externalRuntime.lastHandledVersionHash
+
+    const staleApplied = service.dispatch({
+      windowId,
+      command: 'document.external.apply',
+      payload: {
+        version: 1,
+      },
+    })
+
+    expect(staleApplied.snapshot.content).toBe('# 用户本地内容')
+    expect(staleApplied.snapshot.externalPrompt).toEqual(beforeStaleActionPrompt)
+    expect(staleApplied.session.externalRuntime.pendingExternalChange).toMatchObject({
+      version: 2,
+      diskContent: '# 外部版本 2',
+    })
+    expect(staleApplied.session.externalRuntime.lastResolutionResult).toBe(beforeStaleActionResolutionResult)
+    expect(staleApplied.session.externalRuntime.lastHandledVersionHash).toBe(beforeStaleActionHandledVersionHash)
+
+    const staleIgnored = service.dispatch({
+      windowId,
+      command: 'document.external.ignore',
+      payload: {
+        version: 1,
+      },
+    })
+
+    expect(staleIgnored.snapshot.content).toBe('# 用户本地内容')
+    expect(staleIgnored.snapshot.externalPrompt).toEqual(beforeStaleActionPrompt)
+    expect(staleIgnored.session.externalRuntime.pendingExternalChange).toMatchObject({
+      version: 2,
+      diskContent: '# 外部版本 2',
+    })
+    expect(staleIgnored.session.externalRuntime.lastResolutionResult).toBe(beforeStaleActionResolutionResult)
+    expect(staleIgnored.session.externalRuntime.lastHandledVersionHash).toBe(beforeStaleActionHandledVersionHash)
+  })
+
+  it('save.succeeded 如果把既有外部差异消解掉，必须收敛为 noop 并清掉 pendingExternalChange', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'save-noop-after-pending-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002145,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 本地未保存内容',
+      },
+    })
+
+    const watched = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002146,
+        diskContent: '# 外部版本 1',
+        diskStat: {
+          mtimeMs: 1700000002146,
+        },
+      },
+    })
+    const pendingVersionHash = watched.session.externalRuntime.pendingExternalChange?.versionHash
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 外部版本 1',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    const saveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 2,
+        content: '# 外部版本 1',
+        path: 'C:/docs/demo.md',
+        trigger: 'manual-save',
+        savedAt: 1700000002147,
+        stat: {
+          mtimeMs: 1700000002147,
+        },
+      },
+    })
+
+    expect(saveSucceeded.snapshot.content).toBe('# 外部版本 1')
+    expect(saveSucceeded.snapshot.saved).toBe(true)
+    expect(saveSucceeded.snapshot.externalPrompt).toBeNull()
+    expect(saveSucceeded.session.externalRuntime.pendingExternalChange).toBeNull()
+    expect(saveSucceeded.session.externalRuntime.resolutionState).toBe('resolved')
+    expect(saveSucceeded.session.externalRuntime.lastResolutionResult).toBe('noop')
+    expect(saveSucceeded.session.externalRuntime.lastHandledVersionHash).toBe(pendingVersionHash)
+  })
+
+  it('save.succeeded 不得把保存途中出现的新外部版本误收敛成 noop', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'save-should-keep-midflight-external-pending-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002147,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 本地内容',
+      },
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    const watched = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002148,
+        diskContent: '# 外部版本',
+        diskStat: {
+          mtimeMs: 1700000002148,
+        },
+      },
+    })
+    const pendingVersionHash = watched.session.externalRuntime.pendingExternalChange?.versionHash
+
+    const saveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 本地内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'manual-save',
+        savedAt: 1700000002149,
+        stat: {
+          mtimeMs: 1700000002149,
+        },
+      },
+    })
+
+    expect(saveSucceeded.snapshot.content).toBe('# 本地内容')
+    expect(saveSucceeded.snapshot.saved).toBe(false)
+    expect(saveSucceeded.snapshot.dirty).toBe(true)
+    expect(saveSucceeded.snapshot.externalPrompt).toMatchObject({
+      version: 1,
+      externalContent: '# 外部版本',
+    })
+    expect(saveSucceeded.session.diskSnapshot.content).toBe('# 外部版本')
+    expect(saveSucceeded.session.diskSnapshot.versionHash).toBe(pendingVersionHash)
+    expect(saveSucceeded.session.externalRuntime.pendingExternalChange).toMatchObject({
+      version: 1,
+      versionHash: pendingVersionHash,
+      diskContent: '# 外部版本',
+    })
+    expect(saveSucceeded.session.externalRuntime.resolutionState).toBe('pending-user')
+    expect(saveSucceeded.session.externalRuntime.lastResolutionResult).toBe('none')
+    expect(saveSucceeded.session.externalRuntime.lastHandledVersionHash).toBeNull()
+  })
+
+  it('同一路径 watch.error 重绑后，save.succeeded 不得吞掉旧 pendingExternalChange', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'save-should-keep-pending-after-same-path-rebind-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002150,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 本地内容',
+      },
+    })
+
+    const watched = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002151,
+        diskContent: '# 外部版本',
+        diskStat: {
+          mtimeMs: 1700000002151,
+        },
+      },
+    })
+    const pendingVersionHash = watched.session.externalRuntime.pendingExternalChange?.versionHash
+
+    const rebindRequested = service.dispatch({
+      windowId,
+      command: 'watch.error',
+      payload: {
+        bindingToken: 1,
+        watchingPath: 'C:/docs/demo.md',
+        error: {
+          name: 'Error',
+          message: 'watch crashed',
+          code: 'EIO',
+        },
+      },
+    })
+
+    expect(rebindRequested.session.watchRuntime.bindingToken).toBe(2)
+    expect(rebindRequested.session.watchRuntime.watchingPath).toBe('C:/docs/demo.md')
+
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+
+    const saveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 本地内容',
+        path: 'C:/docs/demo.md',
+        trigger: 'manual-save',
+        savedAt: 1700000002152,
+        stat: {
+          mtimeMs: 1700000002152,
+        },
+      },
+    })
+
+    expect(saveSucceeded.snapshot.content).toBe('# 本地内容')
+    expect(saveSucceeded.snapshot.saved).toBe(true)
+    expect(saveSucceeded.snapshot.externalPrompt).toMatchObject({
+      version: 1,
+      externalContent: '# 外部版本',
+    })
+    expect(saveSucceeded.session.externalRuntime.pendingExternalChange).toMatchObject({
+      version: 1,
+      versionHash: pendingVersionHash,
+      diskContent: '# 外部版本',
+      watchBindingToken: 1,
+    })
+    expect(saveSucceeded.session.externalRuntime.resolutionState).toBe('pending-user')
+    expect(saveSucceeded.session.externalRuntime.lastResolutionResult).toBe('none')
+    expect(saveSucceeded.session.externalRuntime.lastHandledVersionHash).toBeNull()
+  })
+
+  it('save.succeeded 如果切换到了新路径，不得用旧 bindingToken 的 pendingExternalChange 做 noop 收敛', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'save-path-switch-with-stale-pending-session',
+      path: 'C:/docs/old.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002148,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/old.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 本地旧路径内容',
+      },
+    })
+
+    service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002149,
+        diskContent: '# 旧路径外部冲突内容',
+        diskStat: {
+          mtimeMs: 1700000002149,
+        },
+      },
+    })
+
+    service.dispatch({
+      windowId,
+      command: 'document.save',
+    })
+    service.dispatch({
+      windowId,
+      command: 'document.edit',
+      payload: {
+        content: '# 旧路径外部冲突内容',
+      },
+    })
+
+    const saveSucceeded = service.dispatch({
+      windowId,
+      command: 'save.succeeded',
+      payload: {
+        jobId: 'job-1',
+        revision: 1,
+        content: '# 本地旧路径内容',
+        path: 'C:/docs/new.md',
+        trigger: 'manual-save',
+        savedAt: 1700000002150,
+        stat: {
+          mtimeMs: 1700000002150,
+        },
+      },
+    })
+
+    expect(saveSucceeded.session.documentSource.path).toBe('C:/docs/new.md')
+    expect(saveSucceeded.session.watchRuntime.bindingToken).toBe(2)
+    expect(saveSucceeded.session.externalRuntime.pendingExternalChange).toBeNull()
+    expect(saveSucceeded.session.externalRuntime.lastHandledVersionHash).toBeNull()
+    expect(saveSucceeded.session.externalRuntime.lastResolutionResult).not.toBe('noop')
+    expect(saveSucceeded.snapshot.externalPrompt).toBeNull()
+  })
+
+  it('watch.error 必须生成新 token 的重绑 effect，且旧 token 的迟到事件不能污染当前路径', () => {
+    const { store, service } = createTestContext({
+      externalFileChangeStrategy: 'prompt',
+    })
+    const session = createBoundFileSession({
+      sessionId: 'watch-rebind-session',
+      path: 'C:/docs/demo.md',
+      content: '# 原始内容',
+      stat: null,
+      now: 1700000002150,
+    })
+    const windowId = bindSession(store, session)
+
+    session.watchRuntime.bindingToken = 1
+    session.watchRuntime.status = 'active'
+    session.watchRuntime.watchingPath = 'C:/docs/demo.md'
+    session.watchRuntime.watchingDirectoryPath = 'C:/docs'
+
+    const rebindRequested = service.dispatch({
+      windowId,
+      command: 'watch.error',
+      payload: {
+        bindingToken: 1,
+        watchingPath: 'C:/docs/demo.md',
+        error: {
+          name: 'Error',
+          message: 'watch crashed',
+          code: 'EIO',
+        },
+      },
+    })
+
+    expect(rebindRequested.session.watchRuntime.bindingToken).toBe(2)
+    expect(rebindRequested.session.watchRuntime.status).toBe('rebinding')
+    expect(rebindRequested.effects).toEqual([
+      {
+        type: 'notify-watch-warning',
+        level: 'warning',
+        reason: 'watch-error',
+        error: {
+          name: 'Error',
+          message: 'watch crashed',
+          code: 'EIO',
+        },
+      },
+      {
+        type: 'rebind-watch',
+        bindingToken: 2,
+        watchingPath: 'C:/docs/demo.md',
+      },
+    ])
+
+    const staleChanged = service.dispatch({
+      windowId,
+      command: 'watch.file-changed',
+      payload: {
+        bindingToken: 1,
+        observedAt: 1700000002151,
+        diskContent: '# 旧 token 的迟到内容',
+        diskStat: {
+          mtimeMs: 1700000002151,
+        },
+      },
+    })
+
+    expect(staleChanged.snapshot.content).toBe('# 原始内容')
+    expect(staleChanged.session.diskSnapshot.content).toBe('# 原始内容')
+    expect(staleChanged.session.watchRuntime.bindingToken).toBe(2)
+
+    const degraded = service.dispatch({
+      windowId,
+      command: 'watch.rebind-failed',
+      payload: {
+        bindingToken: 2,
+        watchingPath: 'C:/docs/demo.md',
+        error: {
+          name: 'Error',
+          message: 'rebind failed',
+          code: 'EACCES',
+        },
+      },
+    })
+
+    expect(degraded.session.watchRuntime.status).toBe('degraded')
+    expect(degraded.effects).toEqual([
+      {
+        type: 'notify-watch-warning',
+        level: 'warning',
+        reason: 'watch-rebind-failed',
+        error: {
+          name: 'Error',
+          message: 'rebind failed',
+          code: 'EACCES',
+        },
+      },
+    ])
+  })
+  describe('多标签命令', () => {
+    function createTwoTabContext(config = []) {
+      const { store, service } = createTestContext(config)
+      const firstSession = createBoundFileSession({
+        sessionId: 'tab-first',
+        path: 'C:/docs/first.md',
+        content: '# first',
+        stat: null,
+        now: 1700000003001,
+      })
+      const secondSession = createBoundFileSession({
+        sessionId: 'tab-second',
+        path: 'C:/docs/second.md',
+        content: '# second',
+        stat: null,
+        now: 1700000003002,
+      })
+      const windowId = bindSession(store, firstSession)
+      store.createSession(secondSession)
+      store.addSessionToWindow({
+        windowId,
+        sessionId: secondSession.sessionId,
+      })
+
+      return {
+        store,
+        service,
+        windowId,
+        firstSession,
+        secondSession,
+      }
+    }
+
+    it('document.activate-tab 应切换活动会话并派发 activate-tab effect', () => {
+      const { store, service, windowId } = createTwoTabContext()
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.activate-tab',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-second')
+      expect(result.effects).toEqual([
+        {
+          type: 'activate-tab',
+          sessionId: 'tab-second',
+        },
+      ])
+      expect(result.snapshot.activeSessionId).toBe('tab-second')
+      expect(result.snapshot.tabs.map(tab => tab.sessionId)).toEqual(['tab-first', 'tab-second'])
+    })
+
+    it('document.activate-tab 切换回已激活的标签时不应重复派发 effect', () => {
+      const { service, windowId } = createTwoTabContext()
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.activate-tab',
+        payload: { sessionId: 'tab-first' },
+      })
+
+      expect(result.effects).toEqual([])
+    })
+
+    it('document.activate-tab 必须拒绝不属于该窗口的会话', () => {
+      const { service, windowId } = createTwoTabContext()
+
+      expect(() => {
+        service.dispatch({
+          windowId,
+          command: 'document.activate-tab',
+          payload: { sessionId: 'missing-session' },
+        })
+      }).toThrow(/sessionId|会话/i)
+    })
+
+    it('开启 switch 自动保存时，切换标签只保存被切走的脏文档，且必须先切后存', () => {
+      const { store, service, windowId } = createTwoTabContext(['switch'])
+
+      // 让第一个标签变脏
+      service.dispatch({
+        windowId,
+        command: 'document.edit',
+        payload: { content: '# first changed' },
+      })
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.activate-tab',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-second')
+      // 写盘必须排在 activate-tab 之后：applyEffects 是顺序 await，
+      // 写盘在前会让切标签等磁盘 IO。
+      expect(result.effects[0]).toEqual({ type: 'activate-tab', sessionId: 'tab-second' })
+      expect(result.effects).toHaveLength(2)
+      expect(result.effects[1]).toEqual(expect.objectContaining({
+        type: 'execute-save',
+        job: expect.objectContaining({
+          sessionId: 'tab-first',
+          trigger: 'switch-auto-save',
+          content: '# first changed',
+        }),
+      }))
+    })
+
+    it('未开启 switch 自动保存时，切换标签不得产生保存副作用', () => {
+      const { service, windowId } = createTwoTabContext(['blur'])
+
+      service.dispatch({
+        windowId,
+        command: 'document.edit',
+        payload: { content: '# first changed' },
+      })
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.activate-tab',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      expect(result.effects).toEqual([{ type: 'activate-tab', sessionId: 'tab-second' }])
+    })
+
+    it('被切走的标签不脏时，切换标签不得触发保存', () => {
+      const { service, windowId } = createTwoTabContext(['switch'])
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.activate-tab',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      expect(result.effects).toEqual([{ type: 'activate-tab', sessionId: 'tab-second' }])
+    })
+
+    it('渲染层未能同步正文时（autoSave: false），切换标签不得保存旧内容', () => {
+      const { service, windowId } = createTwoTabContext(['switch'])
+
+      service.dispatch({
+        windowId,
+        command: 'document.edit',
+        payload: { content: '# first changed' },
+      })
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.activate-tab',
+        payload: { sessionId: 'tab-second', autoSave: false },
+      })
+
+      expect(result.effects).toEqual([{ type: 'activate-tab', sessionId: 'tab-second' }])
+    })
+
+    it('被切走的是未命名草稿时，切换标签不得触发保存', () => {
+      const { store, service } = createTestContext(['switch'])
+      const draftSession = createDraftSession({ sessionId: 'tab-draft' })
+      const fileSession = createBoundFileSession({
+        sessionId: 'tab-file',
+        path: 'C:/docs/file.md',
+        content: '# file',
+        stat: null,
+        now: 1700000003004,
+      })
+      const windowId = bindSession(store, draftSession)
+      store.createSession(fileSession)
+      store.addSessionToWindow({ windowId, sessionId: fileSession.sessionId })
+
+      service.dispatch({
+        windowId,
+        command: 'document.edit',
+        payload: { content: '# draft changed' },
+      })
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.activate-tab',
+        payload: { sessionId: 'tab-file' },
+      })
+
+      // 草稿没有保存路径，不能弹保存对话框
+      expect(result.effects).toEqual([{ type: 'activate-tab', sessionId: 'tab-file' }])
+    })
+
+    it('document.reorder-tabs 应改写标签顺序，并要求集合一致', () => {
+      const { store, service, windowId } = createTwoTabContext()
+
+      service.dispatch({
+        windowId,
+        command: 'document.reorder-tabs',
+        payload: { sessionIds: ['tab-second', 'tab-first'] },
+      })
+
+      expect(store.getSessionIdsByWindowId(windowId)).toEqual(['tab-second', 'tab-first'])
+      expect(() => {
+        service.dispatch({
+          windowId,
+          command: 'document.reorder-tabs',
+          payload: { sessionIds: ['tab-first'] },
+        })
+      }).toThrow(/sessionIds/i)
+    })
+
+    it('document.close-tab 关闭干净的后台标签时必须直接关闭，不得切过去', () => {
+      const { store, service, windowId } = createTwoTabContext()
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tab',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      // 用户点的是关闭按钮，不是“打开这个标签”：
+      // 干净标签直接关掉即可，不需要先激活再关。
+      expect(result.effects).toEqual([
+        {
+          type: 'close-tab',
+          sessionId: 'tab-second',
+        },
+      ])
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-first')
+    })
+
+    it('document.close-tabs 必须一次派发批量 effect，且不得逐个激活标签', () => {
+      const { store, service, windowId } = createTwoTabContext()
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tabs',
+        payload: { sessionIds: ['tab-second'] },
+      })
+
+      expect(result.effects).toEqual([
+        {
+          type: 'close-tabs',
+          sessionIds: ['tab-second'],
+        },
+      ])
+      // 关键：批量关闭不得像 close-tab 那样“先激活目标”，
+      // 否则活动标签会在渲染层跳来跳去
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-first')
+    })
+
+    it('document.close-tabs 必须跳过脏标签，只关干净标签', () => {
+      const { service, windowId, secondSession } = createTwoTabContext()
+      secondSession.editorSnapshot.content = '# 已修改'
+      secondSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tabs',
+        payload: { sessionIds: ['tab-first', 'tab-second'] },
+      })
+
+      expect(result.effects).toEqual([
+        {
+          type: 'close-tabs',
+          sessionIds: ['tab-first'],
+        },
+      ])
+    })
+
+    it('document.close-tabs 全部是脏标签时不派发任何 effect', () => {
+      const { service, windowId, firstSession, secondSession } = createTwoTabContext()
+      firstSession.editorSnapshot.content = '# first 已修改'
+      firstSession.editorSnapshot.revision = 1
+      secondSession.editorSnapshot.content = '# second 已修改'
+      secondSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tabs',
+        payload: { sessionIds: ['tab-first', 'tab-second'] },
+      })
+
+      expect(result.effects).toEqual([])
+    })
+
+    it('document.close-tabs 必须忽略不属于本窗口的 sessionId', () => {
+      const { service, windowId } = createTwoTabContext()
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tabs',
+        payload: { sessionIds: ['tab-second', 'not-in-window'] },
+      })
+
+      expect(result.effects).toEqual([
+        {
+          type: 'close-tabs',
+          sessionIds: ['tab-second'],
+        },
+      ])
+    })
+
+    it('document.close-tabs 空列表不得派发 effect', () => {
+      const { service, windowId } = createTwoTabContext()
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tabs',
+        payload: { sessionIds: [] },
+      })
+
+      expect(result.effects).toEqual([])
+    })
+
+    it('document.move-tab-to-new-window 必须派发迁移 effect，且不改动活动标签', () => {
+      const { store, service, windowId } = createTwoTabContext()
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.move-tab-to-new-window',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      expect(result.effects).toEqual([
+        {
+          type: 'move-tab-to-new-window',
+          sessionId: 'tab-second',
+        },
+      ])
+      // 迁移只换归属窗口，活动指针由落地阶段处理，命令层不得先切过去
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-first')
+    })
+
+    it('document.move-tab-to-new-window 脏标签也必须允许迁移', () => {
+      const { service, windowId, secondSession } = createTwoTabContext()
+      secondSession.editorSnapshot.content = '# 未保存内容'
+      secondSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.move-tab-to-new-window',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      // 迁移搬的是整个会话，脏状态跟会话走，所以脏标签不应该被拦下
+      expect(result.effects).toEqual([
+        {
+          type: 'move-tab-to-new-window',
+          sessionId: 'tab-second',
+        },
+      ])
+    })
+
+    it('document.move-tab-to-new-window 单标签窗口不得迁移', () => {
+      const { store, service, windowId } = createTwoTabContext()
+      store.removeSessionFromWindow({ windowId, sessionId: 'tab-first' })
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.move-tab-to-new-window',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      // 单标签迁移等价于“关窗口 + 开新窗口”，没有任何收益，直接不派发
+      expect(result.effects).toEqual([])
+    })
+
+    it('document.move-tab-to-new-window 保存进行中的标签不得迁移', () => {
+      const { service, windowId, secondSession } = createTwoTabContext()
+      // 保存任务在飞时换窗口，回写结果会落到错误的窗口上
+      secondSession.saveRuntime.inFlightJobId = 'job-in-flight'
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.move-tab-to-new-window',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      expect(result.effects).toEqual([])
+    })
+
+    it('document.move-tab-to-new-window 必须拒绝不属于本窗口的会话', () => {
+      const { service, windowId } = createTwoTabContext()
+
+      expect(() => {
+        service.dispatch({
+          windowId,
+          command: 'document.move-tab-to-new-window',
+          payload: { sessionId: 'not-in-window' },
+        })
+      }).toThrow(/move-tab-to-new-window|会话/i)
+    })
+
+    it('document.close-tab 遇到脏标签时必须先激活再进入标签作用域的确认弹窗', () => {
+      const { store, service, windowId, secondSession } = createTwoTabContext()
+      secondSession.editorSnapshot.content = '# 已修改'
+      secondSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tab',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-second')
+      expect(result.effects).toEqual([
+        {
+          type: 'activate-tab',
+          sessionId: 'tab-second',
+        },
+        {
+          type: 'show-unsaved-prompt',
+        },
+      ])
+      expect(result.snapshot.closePrompt).toMatchObject({
+        visible: true,
+        scope: 'tab',
+        reason: 'unsaved-changes',
+        unsavedTabCount: 1,
+      })
+    })
+
+    it('关闭窗口时多个脏标签必须交给 save-all-and-close 一次性保存，不再弹笼统确认', () => {
+      const { store, service, windowId, firstSession, secondSession } = createTwoTabContext(['close'])
+      firstSession.editorSnapshot.content = '# first 已修改'
+      firstSession.editorSnapshot.revision = 1
+      secondSession.editorSnapshot.content = '# second 已修改'
+      secondSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.request-close',
+        payload: null,
+      })
+
+      expect(result.effects).toEqual([
+        {
+          type: 'hold-window-close',
+        },
+        {
+          type: 'save-all-and-close',
+        },
+      ])
+      // 自动保存路径不得切换活动标签：关窗不该让界面在后台跳标签。
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-first')
+    })
+
+    it('窗口关闭时只有后台标签脏，也必须被保存后再关窗', () => {
+      const { service, windowId, secondSession } = createTwoTabContext(['close'])
+      secondSession.editorSnapshot.content = '# second 已修改'
+      secondSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.request-close',
+        payload: null,
+      })
+
+      expect(result.effects).toContainEqual({
+        type: 'save-all-and-close',
+      })
+      expect(result.snapshot.closePrompt).toBeNull()
+    })
+
+    it('多个脏标签时 document.save-and-close 必须交给 save-all-and-close 收口', () => {
+      const { service, windowId, firstSession, secondSession } = createTwoTabContext()
+      firstSession.editorSnapshot.content = '# first 已修改'
+      firstSession.editorSnapshot.revision = 1
+      secondSession.editorSnapshot.content = '# second 已修改'
+      secondSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.save-and-close',
+        payload: null,
+      })
+
+      expect(result.effects).toEqual([
+        {
+          type: 'save-all-and-close',
+        },
+      ])
+    })
+
+    it('document.edit 必须按 sessionId 定向写入，不能落到窗口活动会话', () => {
+      const { store, service, windowId, firstSession, secondSession } = createTwoTabContext()
+      secondSession.editorSnapshot.content = '# second 原始'
+      secondSession.editorSnapshot.revision = 1
+
+      service.dispatch({
+        windowId,
+        sessionId: 'tab-second',
+        command: 'document.edit',
+        payload: {
+          sessionId: 'tab-second',
+          content: '# second 后台编辑',
+        },
+      })
+
+      // 活动会话保持不动，后台会话拿到新正文：
+      // 这正是“关后台标签不会把活动标签内容写进别人文件”的前提。
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-first')
+      expect(firstSession.editorSnapshot.content).toBe('# first')
+      expect(secondSession.editorSnapshot.content).toBe('# second 后台编辑')
+    })
+
+    it('document.edit 的 seq 必须单调递增，过期写入必须被丢弃', () => {
+      const { service, windowId, secondSession } = createTwoTabContext()
+
+      service.dispatch({
+        windowId,
+        sessionId: 'tab-second',
+        command: 'document.edit',
+        payload: { sessionId: 'tab-second', content: '# 新版本', seq: 2 },
+      })
+      service.dispatch({
+        windowId,
+        sessionId: 'tab-second',
+        command: 'document.edit',
+        payload: { sessionId: 'tab-second', content: '# 旧版本', seq: 1 },
+      })
+
+      // 批量关闭/flush 会并发推多条全文，没有序号就会让旧正文盖回新正文。
+      expect(secondSession.editorSnapshot.content).toBe('# 新版本')
+    })
+
+    it('开启关闭标签自动保存时，关后台脏标签必须直接保存并关闭，且不切换活动标签', () => {
+      const { store, service, windowId, secondSession } = createTwoTabContext(['closeTab'])
+      secondSession.editorSnapshot.content = '# second 已修改'
+      secondSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tab',
+        payload: { sessionId: 'tab-second' },
+      })
+
+      expect(result.effects).toEqual([
+        {
+          type: 'execute-save',
+          job: expect.objectContaining({
+            trigger: 'close-auto-save',
+            path: 'C:/docs/second.md',
+            content: '# second 已修改',
+          }),
+        },
+        {
+          type: 'close-tab-after-save',
+          sessionId: 'tab-second',
+        },
+      ])
+      // 关键不变量：关后台标签不允许把活动标签拖过去。
+      expect(store.getActiveSessionIdByWindowId(windowId)).toBe('tab-first')
+    })
+
+    it('开启关闭标签自动保存时，未命名草稿与外部变更未决的标签必须被跳过并汇总提示', () => {
+      const { store, service, windowId, firstSession } = createTwoTabContext(['closeTab'])
+      const draftSession = createDraftSession({
+        sessionId: 'tab-draft',
+        now: 1700000003050,
+      })
+      store.createSession(draftSession)
+      store.addSessionToWindow({ windowId, sessionId: 'tab-draft' })
+      draftSession.editorSnapshot.content = '# 草稿'
+      draftSession.editorSnapshot.revision = 1
+
+      const externalSession = createBoundFileSession({
+        sessionId: 'tab-external',
+        path: 'C:/docs/external.md',
+        content: '# external',
+        stat: null,
+        now: 1700000003051,
+      })
+      store.createSession(externalSession)
+      store.addSessionToWindow({ windowId, sessionId: 'tab-external' })
+      externalSession.editorSnapshot.content = '# external 已修改'
+      externalSession.editorSnapshot.revision = 1
+      externalSession.externalRuntime.pendingExternalChange = { version: 1 }
+
+      // 活动标签改成脏的，覆盖“先保存再关”的分支。
+      firstSession.editorSnapshot.content = '# first 已修改'
+      firstSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tabs',
+        payload: { sessionIds: ['tab-draft', 'tab-external', 'tab-first'] },
+      })
+
+      expect(result.effects).toEqual([
+        {
+          type: 'save-tabs-and-close',
+          // 草稿与外部变更未决的标签被跳过并保留，不参与关闭。
+          closeSessionIds: ['tab-first'],
+          saveSessionIds: ['tab-first'],
+          skipped: [
+            { sessionId: 'tab-draft', reason: 'no-path' },
+            { sessionId: 'tab-external', reason: 'external-change' },
+          ],
+        },
+      ])
+    })
+
+    it('未开启关闭标签自动保存时，批量关闭仍然只关干净标签', () => {
+      const { service, windowId, secondSession, firstSession } = createTwoTabContext()
+      firstSession.editorSnapshot.content = '# first 已修改'
+      firstSession.editorSnapshot.revision = 1
+
+      const result = service.dispatch({
+        windowId,
+        command: 'document.close-tabs',
+        payload: { sessionIds: ['tab-first', 'tab-second'] },
+      })
+
+      // 行为必须与旧版完全一致：脏标签静默保留，不提示、不保存。
+      expect(result.effects).toEqual([
+        {
+          type: 'close-tabs',
+          sessionIds: ['tab-second'],
+        },
+      ])
+      expect(secondSession.editorSnapshot.content).toBe('# second')
+    })
+  })
+})

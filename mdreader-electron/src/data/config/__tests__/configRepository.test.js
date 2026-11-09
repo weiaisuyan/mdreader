@@ -1,0 +1,196 @@
+import path from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
+import { createConfigRepository } from '../configRepository.js'
+
+// 配置目录解析链会在导入期引用 electron.app，这里只做占位，实际 app 由用例注入。
+vi.mock('electron', () => ({ app: {} }))
+
+function createFakeFs({
+  existingPaths = new Set(),
+  fileContents = new Map(),
+  ensureDirError = null,
+  writeFileError = null,
+} = {}) {
+  const ensuredDirectories = []
+  const writtenFiles = []
+
+  return {
+    ensuredDirectories,
+    writtenFiles,
+    async ensureDir(targetPath) {
+      if (ensureDirError)
+        throw ensureDirError
+
+      ensuredDirectories.push(targetPath)
+      existingPaths.add(targetPath)
+    },
+    async pathExists(targetPath) {
+      return existingPaths.has(targetPath)
+    },
+    async readFile(targetPath, encoding) {
+      if (encoding !== 'utf8')
+        throw new Error(`unexpected encoding: ${encoding}`)
+
+      if (!fileContents.has(targetPath))
+        throw new Error(`missing file: ${targetPath}`)
+
+      return fileContents.get(targetPath)
+    },
+    async writeFile(targetPath, text, options) {
+      if (writeFileError)
+        throw writeFileError
+
+      writtenFiles.push({ targetPath, text, options })
+      fileContents.set(targetPath, text)
+      existingPaths.add(targetPath)
+    },
+    getFileText(targetPath) {
+      return fileContents.get(targetPath)
+    },
+  }
+}
+
+describe('configRepository', () => {
+  it('数据目录写在应用目录时（WJ_USER_DATA_IN_APP_DIR=1）必须使用 app.getAppPath 下的 config.json', async () => {
+    const appPath = path.resolve('/app')
+    const repository = createConfigRepository({
+      app: {
+        getAppPath: () => appPath,
+        getPath: () => path.resolve('/userData'),
+      },
+      env: { WJ_USER_DATA_IN_APP_DIR: '1' },
+      fs: createFakeFs(),
+      writeFileAtomic: vi.fn(),
+    })
+
+    expect(repository.getConfigPath()).toMatch(/[\\/]config\.json$/)
+    expect(repository.getConfigPath()).toBe(path.join(appPath, 'data', 'config.json'))
+  })
+
+  it('非开发态必须使用 app.getPath("userData") 作为配置目录', async () => {
+    const userDataPath = path.resolve('/userData')
+    const repository = createConfigRepository({
+      app: {
+        getAppPath: () => path.resolve('/app'),
+        getPath: name => (name === 'userData' ? userDataPath : path.resolve('/unused')),
+      },
+      env: {},
+      fs: createFakeFs(),
+      writeFileAtomic: vi.fn(),
+    })
+
+    expect(repository.getConfigPath()).toBe(path.join(userDataPath, 'data', 'config.json'))
+  })
+
+  it('配置目录必须惰性解析，不能在构造期固化', () => {
+    let currentDir = path.resolve('/before')
+    const repository = createConfigRepository({
+      app: {
+        getAppPath: () => path.resolve('/app'),
+        getPath: () => currentDir,
+      },
+      env: {},
+      fs: createFakeFs(),
+      writeFileAtomic: vi.fn(),
+    })
+
+    expect(repository.getConfigPath()).toBe(path.join(currentDir, 'data', 'config.json'))
+
+    currentDir = path.resolve('/after')
+    expect(repository.getConfigPath()).toBe(path.join(currentDir, 'data', 'config.json'))
+  })
+
+  it('jSON 解析失败时必须备份损坏文件并回退默认配置流程', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-23T10:20:30.456Z'))
+
+    const userDataPath = path.resolve('/userData')
+    const configDir = path.join(userDataPath, 'data')
+    const configPath = path.join(configDir, 'config.json')
+    const rawText = '{"broken": }'
+    const backupPath = path.join(configDir, 'config.corrupted.1774261230456.json')
+    const fakeFs = createFakeFs({
+      existingPaths: new Set([configDir, configPath]),
+      fileContents: new Map([[configPath, rawText]]),
+    })
+    const repository = createConfigRepository({
+      app: {
+        getAppPath: () => path.resolve('/unused'),
+        getPath: () => userDataPath,
+      },
+      env: {},
+      fs: fakeFs,
+      writeFileAtomic: vi.fn(),
+    })
+
+    await expect(repository.readParsedConfig()).rejects.toThrow('CONFIG_PARSE_FAILED')
+    expect(fakeFs.writtenFiles).toContainEqual({
+      targetPath: backupPath,
+      text: rawText,
+      options: 'utf8',
+    })
+    expect(fakeFs.getFileText(backupPath)).toBe(rawText)
+
+    vi.useRealTimers()
+  })
+
+  it('备份损坏文件失败时对外仍然必须稳定抛出 CONFIG_PARSE_FAILED', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-23T10:20:30.456Z'))
+
+    const userDataPath = path.resolve('/userData')
+    const configDir = path.join(userDataPath, 'data')
+    const configPath = path.join(configDir, 'config.json')
+    const backupWriteError = new Error('disk full')
+    const fakeFs = createFakeFs({
+      existingPaths: new Set([configDir, configPath]),
+      fileContents: new Map([[configPath, '{"broken": }']]),
+      writeFileError: backupWriteError,
+    })
+    const repository = createConfigRepository({
+      app: {
+        getAppPath: () => path.resolve('/unused'),
+        getPath: () => userDataPath,
+      },
+      env: {},
+      fs: fakeFs,
+      writeFileAtomic: vi.fn(),
+    })
+
+    const thrownError = await repository.readParsedConfig().catch(error => error)
+
+    expect(thrownError).toBeInstanceOf(Error)
+    expect(thrownError.message).toBe('CONFIG_PARSE_FAILED')
+    expect(thrownError.cause).toBeInstanceOf(Error)
+    expect(thrownError.cause.message).toContain('Unexpected token')
+    expect(thrownError.backupError).toBe(backupWriteError)
+
+    vi.useRealTimers()
+  })
+
+  it('写入配置文本前必须先确保配置目录存在，并使用原子写与 utf8 编码', async () => {
+    const writeFileAtomic = vi.fn().mockResolvedValue(undefined)
+    const fakeFs = createFakeFs()
+    const userDataPath = path.resolve('/userData')
+    const configDir = path.join(userDataPath, 'data')
+    const repository = createConfigRepository({
+      app: {
+        getAppPath: () => path.resolve('/unused'),
+        getPath: () => userDataPath,
+      },
+      env: {},
+      fs: fakeFs,
+      writeFileAtomic,
+    })
+
+    await repository.writeConfigText('{"configVersion":1}')
+
+    expect(fakeFs.ensuredDirectories).toEqual([configDir])
+    expect(writeFileAtomic).toHaveBeenCalledTimes(1)
+    expect(writeFileAtomic).toHaveBeenCalledWith(
+      path.join(configDir, 'config.json'),
+      '{"configVersion":1}',
+      { encoding: 'utf8' },
+    )
+  })
+})

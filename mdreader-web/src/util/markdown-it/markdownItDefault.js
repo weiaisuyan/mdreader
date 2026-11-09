@@ -1,0 +1,83 @@
+import { footnote } from '@mdit/plugin-footnote'
+import { imgSize } from '@mdit/plugin-img-size'
+import { katex as MarkdownItKatex } from '@mdit/plugin-katex'
+import MarkdownIt from 'markdown-it'
+import MarkdownItAnchor from 'markdown-it-anchor'
+import MarkdownItContainer from 'markdown-it-container'
+import MarkdownItDefList from 'markdown-it-deflist'
+import MarkdownItGitHubAlerts from 'markdown-it-github-alerts'
+import MarkdownItIns from 'markdown-it-ins'
+import MarkdownItMark from 'markdown-it-mark'
+import MarkdownItSub from 'markdown-it-sub'
+import MarkdownItSup from 'markdown-it-sup'
+import MarkdownItTaskLists from 'markdown-it-task-lists'
+import { useCommonStore } from '@/stores/counter.js'
+import markdownItAudio from '@/util/markdown-it/markdownItAudio.js'
+import MarkdownItCodeBlock from '@/util/markdown-it/markdownItCodeBlock.js'
+import markdownItContainerUtil from '@/util/markdown-it/markdownItContainerUtil.js'
+import markdownItFrontMatter from '@/util/markdown-it/markdownItFrontMatter.js'
+import markdownItHtmlImage from '@/util/markdown-it/markdownItHtmlImage.js'
+import markdownItImage from '@/util/markdown-it/markdownItImage.js'
+import markdownItKatexLineNumber from '@/util/markdown-it/markdownItKatexLineNumber.js'
+import markdownItLineNumber from '@/util/markdown-it/markdownItLineNumber.js'
+import markdownItLink from '@/util/markdown-it/markdownItLink.js'
+import markdownItStripBom from '@/util/markdown-it/markdownItStripBom.js'
+import markdownItTextColor from '@/util/markdown-it/markdownItTextColor.js'
+import markdownItVideo from '@/util/markdown-it/markdownItVideo.js'
+
+const md = new MarkdownIt({
+  html: true,
+  linkify: true,
+  breaks: true,
+  typographer: useCommonStore().config.markdown.typographer,
+  xhtmlOut: true,
+})
+
+md.use(MarkdownItSup)
+  .use(MarkdownItSub)
+  .use(MarkdownItDefList)
+  .use(MarkdownItIns)
+  .use(MarkdownItMark)
+  .use(MarkdownItTaskLists)
+  .use(MarkdownItGitHubAlerts)
+  .use(MarkdownItKatex, { delimiters: 'all', throwOnError: false })
+  .use(MarkdownItCodeBlock)
+  .use(MarkdownItAnchor)
+  .use(imgSize)
+  .use(footnote)
+
+// 文档开头的 front matter（YAML 元数据块）
+markdownItFrontMatter(md)
+
+// 去掉开头的 UTF-8 BOM：否则首个 `# 标题` 会退化成普通段落
+markdownItStripBom(md)
+
+// 文字颜色
+markdownItTextColor(md)
+
+// 给本地图片加上自定义协议
+markdownItImage(md)
+markdownItHtmlImage(md)
+
+// 给链接加上_blank
+markdownItLink(md)
+
+// 添加原始文本对应的行号区域
+markdownItLineNumber(md)
+
+// 给 KaTeX 块级公式根节点补充行号属性
+markdownItKatexLineNumber(md)
+
+// 容器
+markdownItContainerUtil.createContainerPlugin(md, ['info', 'warning', 'danger', 'tip', 'important', 'details'])
+  .forEach((containerPlugin) => {
+    md.use(MarkdownItContainer, containerPlugin.type, containerPlugin)
+  })
+
+// 视频
+markdownItVideo(md)
+
+// 音频
+markdownItAudio(md)
+
+export default md

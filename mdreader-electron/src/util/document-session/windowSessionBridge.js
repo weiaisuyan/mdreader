@@ -1,0 +1,159 @@
+import { deriveWindowDocumentSnapshot, deriveWindowGroupsSnapshot, deriveWindowTabsSnapshot } from './documentWindowSnapshotUtil.js'
+
+function isWindowUsable(win) {
+  if (!win) {
+    return false
+  }
+  if (typeof win.isDestroyed === 'function' && win.isDestroyed()) {
+    return false
+  }
+  if (win.webContents && typeof win.webContents.isDestroyed === 'function' && win.webContents.isDestroyed()) {
+    return false
+  }
+  return true
+}
+
+/**
+ * 统一负责把主进程当前 active session 真相投影给渲染层。
+ *
+ * 这里故意只暴露 `document.snapshot.changed` / `window.effect.*` 三类推送：
+ * 1. `document.snapshot.changed` 是 renderer 唯一允许依赖的状态真相
+ * 2. `window.effect.message` 只承载一次性提示，不能混入持久状态
+ * 3. `window.effect.recent-list-changed` 只承载完整 recent 列表刷新
+ *
+ * Task 7 起不再补发 `file-is-saved`、`file-external-changed`、`update-recent`
+ * 这类 legacy 文档事件；Task 5 起 session 路径上的一次性提示也不再补发
+ * legacy `message`，避免主进程再次长出第二套状态出口。
+ */
+export function createWindowSessionBridge({
+  store,
+  sendToRenderer,
+  resolveWindowById,
+  getAllWindows = () => [],
+}) {
+  let lastRecentListSignature = null
+
+  function getSessionSnapshot(windowId) {
+    return deriveWindowDocumentSnapshot({
+      store,
+      windowId,
+    })
+  }
+
+  /**
+   * 按窗口当前持有的会话顺序生成标签列表。
+   *
+   * 标签顺序就是用户在标签栏里看到的顺序，必须与 store 里记录的标签顺序一致。
+   */
+  function getWindowTabsSnapshot(windowId) {
+    return deriveWindowTabsSnapshot({ store, windowId })
+  }
+
+  function publishSnapshotChanged({ windowId, snapshot = getSessionSnapshot(windowId) }) {
+    const win = resolveWindowById?.(windowId) || null
+    if (!snapshot || !isWindowUsable(win)) {
+      return snapshot
+    }
+
+    // 命令层直接传进来的快照可能只有单个会话的信息，
+    // 这里统一补齐窗口级标签列表与分栏视图，保证任何推送路径下渲染层拿到的结构一致。
+    //
+    // 注意：只在快照确实缺字段时才补。命令层已经算好的 groups 绝不能被这里的
+    // 重算覆盖，否则会表现为「某一栏偶发消失」——这类静默丢栏极难定位。
+    const hasTabs = Array.isArray(snapshot.tabs)
+    const hasGroups = Array.isArray(snapshot.groups)
+    const windowSnapshot = hasTabs && hasGroups
+      ? snapshot
+      : (() => {
+          const { activeGroupId, groups } = hasGroups
+            ? { activeGroupId: snapshot.activeGroupId, groups: snapshot.groups }
+            : deriveWindowGroupsSnapshot({ store, windowId })
+          const tabs = hasTabs
+            ? snapshot.tabs
+            : (groups.find(group => group.groupId === activeGroupId)?.tabs
+              ?? getWindowTabsSnapshot(windowId))
+          const completed = {
+            ...snapshot,
+            activeSessionId: store?.getActiveSessionIdByWindowId?.(windowId) || snapshot.sessionId || null,
+            tabs,
+          }
+          if (groups.length > 1) {
+            completed.activeGroupId = activeGroupId || groups[0].groupId || null
+            completed.groups = groups
+          }
+          return completed
+        })()
+
+    sendToRenderer(win, {
+      event: 'document.snapshot.changed',
+      data: windowSnapshot,
+    })
+    return windowSnapshot
+  }
+
+  function publishMessage({ windowId, data, snapshot }) {
+    const win = resolveWindowById?.(windowId) || null
+    if (!data || !isWindowUsable(win)) {
+      return null
+    }
+
+    const latestSnapshot = publishSnapshotChanged({
+      windowId,
+      snapshot,
+    })
+    sendToRenderer(win, {
+      event: 'window.effect.message',
+      data,
+    })
+    return latestSnapshot
+  }
+
+  function publishRecentListChanged(recentList) {
+    // recent 列表允许被多个入口重复回调，例如保存后 recent.add 写回、启动时 recent 初始化等。
+    // 这里必须用“完整列表签名”做一次幂等收口，确保只有列表内容真的变化时才广播，
+    // 避免 renderer 因重复 recent 刷新进入无意义重渲染。
+    const nextRecentList = Array.isArray(recentList) ? recentList : []
+    const nextSignature = JSON.stringify(nextRecentList)
+    if (nextSignature === lastRecentListSignature) {
+      return nextRecentList
+    }
+
+    lastRecentListSignature = nextSignature
+    getAllWindows().forEach((win) => {
+      if (!isWindowUsable(win)) {
+        return
+      }
+      sendToRenderer(win, {
+        event: 'window.effect.recent-list-changed',
+        data: nextRecentList,
+      })
+    })
+    return nextRecentList
+  }
+
+  function publishFileManagerDirectoryChanged({ windowId, directoryState }) {
+    const win = resolveWindowById?.(windowId) || null
+    if (!directoryState || !isWindowUsable(win)) {
+      return null
+    }
+
+    sendToRenderer(win, {
+      event: 'window.effect.file-manager-directory-changed',
+      data: directoryState,
+    })
+    return directoryState
+  }
+
+  return {
+    getSessionSnapshot,
+    getWindowTabsSnapshot,
+    publishFileManagerDirectoryChanged,
+    publishSnapshotChanged,
+    publishMessage,
+    publishRecentListChanged,
+  }
+}
+
+export default {
+  createWindowSessionBridge,
+}

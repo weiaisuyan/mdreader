@@ -1,0 +1,160 @@
+{
+  "name": "mdreader",
+  "type": "module",
+  "version": "3.1.1",
+  "description": "markdown编辑器",
+  "author": {
+    "name": "魏杰",
+    "email": "bxqyher@outlook.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/nlbwqmz/wj-markdown-editor",
+  "main": "src/main.js",
+  "desktopName": "wj-markdown-editor",
+  "scripts": {
+    "start": "cross-env WJ_WEB_SOURCE=dev WJ_USER_DATA_IN_APP_DIR=1 electron .",
+    "static": "cross-env WJ_WEB_SOURCE=dist WJ_USER_DATA_IN_APP_DIR=1 electron .",
+    "make": "cd ../mdreader-web && npm install && npm run build && cd ../mdreader-electron && npm install && electron-builder",
+    "build": "electron-builder",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "build": {
+    "appId": "com.mdreader.app",
+    "publish": {
+      "provider": "generic",
+      "url": ""
+    },
+    "productName": "mdreader",
+    "directories": {
+      "output": "electron-build"
+    },
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "files": [
+      "!config.json",
+      "!img/**",
+      "!**/*.map",
+      "!**/*.test.js",
+      "!**/__tests__/**",
+      "!**/tsconfig.json",
+      "!.vscode/**",
+      "!eslint.config.mjs",
+      "!recent.json",
+      "!tab-group.json",
+      "!data/**",
+      "!installer.nsh",
+      "!scripts/**",
+      "!icon/1024x1024.png",
+      "!icon/16x16.png",
+      "!icon/24x24.png",
+      "!icon/32x32.png",
+      "!icon/48x48.png",
+      "!icon/64x64.png",
+      "!icon/128x128.png",
+      "!icon/512x512.png",
+      "!**/node_modules/luxon/build/{amd,cjs-browser,es6,global}/**",
+      "!**/node_modules/luxon/src/**",
+      "!**/node_modules/axios/dist/{browser,esm}/**",
+      "!**/node_modules/axios/dist/axios*.js",
+      "!**/node_modules/ajv/lib/**",
+      "!**/node_modules/dayjs/{locale,esm,plugin}/**",
+      "!**/{README,CHANGELOG,HISTORY}*.{md,markdown}"
+    ],
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "mdreader",
+      "menuCategory": "mdreader",
+      "deleteAppDataOnUninstall": true,
+      "createDesktopShortcut": true,
+      "installerIcon": "./icon/favicon.ico",
+      "uninstallerIcon": "./icon/favicon.ico",
+      "installerHeaderIcon": "./icon/favicon.ico",
+      "perMachine": true,
+      "include": "./installer.nsh"
+    },
+    "win": {
+      "artifactName": "${productName}-${platform}-${arch}-${version}.${ext}",
+      "icon": "./icon/favicon.ico",
+      "target": [
+        {
+          "target": "nsis"
+        },
+        {
+          "target": "zip"
+        }
+      ],
+      "fileAssociations": [
+        {
+          "ext": [
+            "md"
+          ],
+          "name": "Markdown File"
+        }
+      ]
+    },
+    "linux": {
+      "syncDesktopName": true,
+      "icon": "./icon",
+      "category": "Utility",
+      "artifactName": "${productName}-${platform}-${arch}-${version}.${ext}",
+      "mimeTypes": [
+        "text/markdown"
+      ],
+      "target": [
+        {
+          "target": "deb"
+        },
+        {
+          "target": "rpm"
+        },
+        {
+          "target": "AppImage"
+        }
+      ],
+      "fileAssociations": [
+        {
+          "ext": "md",
+          "mimeType": "text/markdown",
+          "name": "Markdown File"
+        }
+      ]
+    },
+    "appImage": {
+      "artifactName": "${productName}-${arch}-${version}.${ext}"
+    },
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
+    "afterPack": "./scripts/afterPack.cjs"
+  },
+  "dependencies": {
+    "ajv": "^8.18.0",
+    "axios": "^1.13.2",
+    "dayjs": "^1.11.13",
+    "electron-log": "^5.3.4",
+    "electron-screenshots": "^0.5.28",
+    "electron-updater": "^6.6.2",
+    "form-data": "^4.0.2",
+    "fs-extra": "^11.3.0",
+    "mime-types": "^3.0.1",
+    "nanoid": "^5.1.5",
+    "node-schedule": "^2.1.1",
+    "semver": "^7.7.1",
+    "write-file-atomic": "^6.0.0"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^4.11.0",
+    "cross-env": "^7.0.3",
+    "electron": "43.7.9",
+    "electron-builder": "26.17.0",
+    "eslint": "^9.17.0",
+    "eslint-plugin-format": "^1.0.1",
+    "vitest": "^4.0.18"
+  }
+}

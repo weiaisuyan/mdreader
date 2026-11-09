@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      // 主题必须在首帧之前定下来：这里同步读取 preload 注入的初始主题，
+      // 不能等渲染层的 get-config IPC，否则首帧会按默认浅色绘制，暗色下会闪白。
+      try {
+        document.documentElement.setAttribute('theme', window.node?.initialTheme === 'dark' ? 'dark' : 'light')
+      } catch (error) {
+        // 读取主题失败时保持默认浅色，不能阻塞页面加载
+      }
+    </script>
+    <style>
+      /*
+       * 全局底色的兜底：外链 CSS 加载前、以及各视图挂载前，html/body 必须已经有
+       * 与主题一致的底色，否则会露出浏览器默认白画布。这里必须写死色值，
+       * 不能引用 --wj-markdown-bg-primary（此时主题变量还不存在）。
+       */
+      :root,
+      :root body {
+        background-color: #ffffff;
+      }
+
+      :root[theme='dark'],
+      :root[theme='dark'] body {
+        background-color: #282c34;
+      }
+    </style>
+    <link rel="icon" href="./favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>wj-markdown-editor</title>
+    <script type="module" crossorigin src="./assets/index-BBI-dDwJ.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CIOZm4y1.css">
+  </head>
+  <body>
+    <div
+      id="startup-loading"
+      style="
+        width: 100vw;
+        height: 100vh;
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        visibility: hidden;
+      "
+    >
+      <img
+        src="favicon.ico"
+        alt=""
+        style="max-width: 256px; max-height: 256px; width: calc(100vw * 0.3); height: calc(100vw * 0.3)"
+      />
+    </div>
+    <script>
+      // 直接以 head 里已经定好的 theme 属性为准，避免两处判断来源不一致
+      const initialTheme = document.documentElement.getAttribute('theme') === 'dark' ? 'dark' : 'light'
+
+      if (window.location.href.indexOf('searchBar') > -1 || window.location.href.indexOf('export') > -1) {
+        document.getElementById('startup-loading').remove()
+      } else {
+        const startupLoading = document.getElementById('startup-loading')
+        if (startupLoading) {
+          // 遮罩必须无条件上底色：只在暗色分支里设色时，浅色分支会留着透明，
+          // 一旦底下是深色内容就会闪一下浅底
+          startupLoading.style.backgroundColor = initialTheme === 'dark' ? 'rgb(40,44,52)' : '#ffffff'
+          startupLoading.style.visibility = 'visible'
+        }
+      }
+    </script>
+    <div id="app"></div>
+  </body>
+</html>

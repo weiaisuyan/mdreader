@@ -1,0 +1,51 @@
+// 窗口拖动区标记。
+//
+// 注意：这里**故意不再设置 `-webkit-app-region: drag`**。
+// 圆角窗口必须 `transparent: true`，Windows 透明窗口会丢掉系统标题栏的全部原生行为
+// （拖动、双击最大化、边缘缩放），而 `-webkit-app-region: drag` 又会吞掉鼠标事件，
+// 导致网页连 doubleclick 都收不到、想自己补都补不了。
+// 所以拖动改由 `util/windowDragUtil.js` 用指针事件 + `move-window` 实现，
+// 这个类现在只作为「这块区域可以拖动窗口」的标记。
+.electron-drag {
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+// 顶部栏内需要响应鼠标事件的区域（菜单、按钮）必须显式声明为非拖拽区，
+// 拖动逻辑据此判断哪些点击不该变成拖窗口。
+.electron-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.mermaid-cache,
+.mermaid {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+//layout menu
+.ant-dropdown-menu-submenu-popup.ant-dropdown-menu {
+  *::-webkit-scrollbar {
+    display: revert;
+    width: 4px;
+    height: 4px;
+  }
+  *::-webkit-scrollbar-track {
+    background-color: #e2e2e2;
+  }
+  *::-webkit-scrollbar-thumb {
+    border-radius: 4px;
+    background-color: #0000004d;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #00000059;
+  }
+  *::-webkit-scrollbar-thumb:active {
+    background-color: #00000061;
+  }
+  .ant-dropdown-menu.ant-dropdown-menu-sub.ant-dropdown-menu-vertical {
+    max-height: 400px;
+    overflow: auto;
+  }
+}

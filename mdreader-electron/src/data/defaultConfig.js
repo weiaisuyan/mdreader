@@ -1,0 +1,427 @@
+export default {
+  configVersion: 1,
+  // 1：无操作（只有网络图片支持） 2: 保存到绝对路径 3：保存到 ./%{filename} 文件夹 4：保存到相对路径 5: 上传到图床
+  imgLocal: '4',
+  imgNetwork: '4',
+  imgAbsolutePath: '',
+  imgRelativePath: 'assets',
+  // 2: 保存到绝对路径 3：保存到 ./%{filename} 文件夹 4：保存到相对路径
+  fileMode: '4',
+  fileAbsolutePath: '',
+  fileRelativePath: 'assets',
+  // 文件管理栏默认目录：当文件管理栏没有可跟随的当前文档目录时作为兜底目录，留空表示不启用
+  fileDefaultDirectory: '',
+  // 可选值 blur(窗口失焦) close(窗口关闭) switch(切换标签) closeTab(关闭标签)
+  autoSave: [],
+  // 侧边栏默认视图：close(关闭) files(文件) outline(大纲)
+  sidebarDefaultView: 'close',
+  sidebarWidth: 280,
+  // 右侧大纲栏：是否显示与栏宽
+  outlineVisible: true,
+  outlineWidth: 240,
+  // 编辑区并排栏：栏数由「窗口里有几个标签组」决定，这里只记宽度（null 表示 1fr 均分）
+  paneLayout: {
+    count: 1,
+    widths: [null],
+  },
+  fileManagerSort: {
+    field: 'type',
+    direction: 'asc',
+  },
+  // 文件管理栏可见文件范围：all(显示全部) / supported(仅显示受支持的文件)，文件夹不受此配置影响
+  fileManagerVisibleFileMode: 'all',
+  fileManagerLeftClickAction: {
+    markdown: 'prompt',
+  },
+  previewWidth: 80,
+  fontSize: 16,
+  fontFamily: {
+    editArea: '',
+    previewArea: '',
+    codeArea: '',
+    otherArea: '',
+  },
+  // 启动视图默认「阅读模式」：markdown 笔记最常见的使用方式是先读，
+  // 只有需要改字时才切源码或双栏，所以默认落在最干净的阅读态。
+  startView: 'preview',
+  // 启动时恢复上次标签组的策略：
+  // never = 不恢复；onStartup = 仅直接启动时恢复；always = 含双击文件打开也恢复
+  restoreTabs: 'onStartup',
+  recentMax: 10,
+  language: 'auto',
+  externalFileChangeStrategy: 'prompt',
+  markdown: {
+    typographer: true,
+    inlineCodeClickCopy: false,
+    imageShadow: true,
+  },
+  export: {
+    pdf: {
+      footer: {
+        pageNumber: true,
+        content: '文档由<a target="_blank" href="https://github.com/nlbwqmz/wj-markdown-editor">wj-markdown-editor</a>导出',
+      },
+      header: {
+        content: '',
+      },
+    },
+  },
+  editor: {
+    associationHighlight: true,
+    previewPosition: 'right',
+  },
+  editorExtension: {
+    lineNumbers: true,
+    lineWrapping: true,
+    highlightActiveLine: true,
+    highlightSelectionMatches: true,
+    bracketMatching: true,
+    closeBrackets: true,
+  },
+  watermark: {
+    enabled: false,
+    previewEnabled: true,
+    dateEnabled: true,
+    datePattern: 'YYYY-MM-DD',
+    content: 'wj-markdown-editor',
+    rotate: -22,
+    gap: [100, 100],
+    font: {
+      fontSize: 20,
+      fontWeight: 800,
+      color: '#5433334F',
+    },
+  },
+  theme: {
+    // 全局主题 light dark
+    global: 'light',
+    code: 'atom-one-dark',
+    preview: 'github',
+  },
+  shortcutKeyList: [
+    {
+      index: -1,
+      id: 'createNew',
+      name: '新建',
+      keymap: 'Ctrl+n',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 1,
+      id: 'openFile',
+      name: '打开',
+      keymap: 'Ctrl+o',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 2,
+      id: 'save',
+      name: '保存',
+      keymap: 'Ctrl+s',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 3,
+      id: 'saveOther',
+      name: '另存为',
+      keymap: 'Ctrl+Shift+s',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 4,
+      id: 'setting',
+      name: '设置',
+      keymap: 'Ctrl+Alt+s',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 5,
+      id: 'viewSource',
+      name: '源码模式',
+      keymap: '',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 5,
+      id: 'viewSplit',
+      name: '双栏模式',
+      keymap: '',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 5,
+      id: 'viewPreview',
+      name: '预览模式',
+      keymap: '',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 6,
+      id: 'toggleFullScreen',
+      name: '全屏切换',
+      keymap: 'F11',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 7,
+      id: 'toggleFileManagerPanel',
+      name: '侧边栏切换',
+      keymap: '',
+      enabled: true,
+      type: 'web',
+    },
+    // 大纲栏切换预置 Alt+O（与 Obsidian 的「大纲:打开」一致）：
+    // 该动作只切换面板显隐、无破坏性，可以随 repairShortcutKeyList 补进存量配置
+    {
+      index: 7,
+      id: 'toggleOutlinePanel',
+      name: '大纲栏切换',
+      keymap: 'Alt+o',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 8,
+      id: 'editor-heading-1',
+      name: '一级标题',
+      keymap: 'Ctrl+1',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 8,
+      id: 'editor-heading-2',
+      name: '二级标题',
+      keymap: 'Ctrl+2',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 8,
+      id: 'editor-heading-3',
+      name: '三级标题',
+      keymap: 'Ctrl+3',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 8,
+      id: 'editor-heading-4',
+      name: '四级标题',
+      keymap: 'Ctrl+4',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 8,
+      id: 'editor-heading-5',
+      name: '五级标题',
+      keymap: 'Ctrl+5',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 8,
+      id: 'editor-heading-6',
+      name: '六级标题',
+      keymap: 'Ctrl+6',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 8,
+      id: 'editor-bold',
+      name: '加粗',
+      keymap: 'Ctrl+Alt+1',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-underline',
+      name: '下划线',
+      keymap: 'Ctrl+Alt+2',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-italic',
+      name: '斜体',
+      keymap: 'Ctrl+Alt+3',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-del',
+      name: '删除线',
+      keymap: 'Ctrl+Alt+4',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-subscript',
+      name: '下标',
+      keymap: 'Ctrl+Alt+5',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-superscript',
+      name: '上标',
+      keymap: 'Ctrl+Alt+6',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-quote',
+      name: '引用',
+      keymap: 'Ctrl+Alt+7',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-list',
+      name: '无序列表',
+      keymap: 'Ctrl+Alt+8',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-list-numbers',
+      name: '有序列表',
+      keymap: 'Ctrl+Alt+9',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-list-check',
+      name: '任务列表',
+      keymap: 'Ctrl+Shift+Alt+!',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-code-inline',
+      name: '行内代码',
+      keymap: 'Ctrl+Shift+Alt+@',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-code-block',
+      name: '代码块',
+      keymap: 'Ctrl+Shift+Alt+#',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-link',
+      name: '链接',
+      keymap: 'Ctrl+Shift+Alt+$',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-mark',
+      name: '标记',
+      keymap: 'Ctrl+Shift+Alt+%',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-image-template',
+      name: '插入图片模板',
+      keymap: 'Ctrl+Alt+i',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-screenshot',
+      name: '直接截图',
+      keymap: 'Ctrl+Alt+p',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 9,
+      id: 'editor-screenshot-hide',
+      name: '隐藏截图',
+      keymap: 'Ctrl+Shift+Alt+P',
+      enabled: true,
+      type: 'editor',
+    },
+    {
+      index: 10,
+      id: 'editor-focus-line',
+      name: '跳转到目标行',
+      keymap: 'Ctrl+j',
+      enabled: true,
+      type: 'editor',
+    },
+    // 标签页快捷键刻意不预置键位：
+    // 1. repairShortcutKeyList 会把新增默认项补进存量配置，预置键位等于给所有老用户
+    //    静默加上立即生效的全局快捷键（其中“关闭标签页”是破坏性动作）
+    // 2. keymap 为空时 HomeView 的 keymap 全等匹配不会命中，等价于“未启用”
+    {
+      index: 11,
+      id: 'switchToNextTab',
+      name: '下一个标签页',
+      keymap: '',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 11,
+      id: 'switchToPreviousTab',
+      name: '上一个标签页',
+      keymap: '',
+      enabled: true,
+      type: 'web',
+    },
+    {
+      index: 11,
+      id: 'closeTab',
+      name: '关闭标签页',
+      keymap: '',
+      enabled: true,
+      type: 'web',
+    },
+  ],
+  imageBed: {
+    uploader: 'github', // 代表当前的默认上传图床为 SM.MS,
+    smms: {
+      token: '', // 通过SMMS后台获取的api token值
+      backupDomain: '', // v2.3.1 支持备用上传域名，可选。推荐 smms.app
+    },
+    github: {
+      repo: '', // 仓库名，格式是 username/reponame
+      token: '', // github token
+      path: '', // 自定义存储路径，比如 img/
+      customUrl: '', // 自定义域名，注意要加 http://或者 https://
+      branch: '', // 分支名，默认是 main
+    },
+  },
+}

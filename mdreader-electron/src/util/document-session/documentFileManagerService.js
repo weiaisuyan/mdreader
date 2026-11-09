@@ -1,0 +1,666 @@
+import path from 'node:path'
+import fs from 'fs-extra'
+import { appendMarkdownExtension } from './documentOpenTargetUtil.js'
+
+function normalizeWindowId(windowId) {
+  if (typeof windowId === 'number' && Number.isFinite(windowId)) {
+    return windowId
+  }
+
+  if (typeof windowId === 'string' && windowId.trim() !== '') {
+    return windowId.trim()
+  }
+
+  return null
+}
+
+function createEmptyDirectoryState() {
+  return {
+    mode: 'empty',
+    directoryPath: null,
+    activePath: null,
+    entryList: [],
+  }
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+function normalizeFileManagerEntryName(name) {
+  return typeof name === 'string' ? name.trim() : ''
+}
+
+// Windows 不允许出现在文件名里的字符（含控制字符，用 Unicode Cc 类别表达）。
+const WINDOWS_INVALID_ENTRY_NAME_CHARACTER_PATTERN = /[<>:"|?*\p{Cc}]/u
+// Windows 设备保留名：CON / PRN / AUX / NUL / COM1-9 / LPT1-9，
+// 带扩展名的 `con.md` 同样不可用，所以后面要允许 `.` 或字符串结束。
+const WINDOWS_RESERVED_ENTRY_NAME_PATTERN = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu
+// Windows 会静默去掉名字结尾的点（输入 `note.` 实际会得到 `note`）。
+// 结尾空格不用单独拦：normalizeFileManagerEntryName 已经做过 trim。
+const TRAILING_DOT_PATTERN = /\.$/u
+
+/**
+ * 名称是否不可用。
+ *
+ * 统一按 Windows 规则校验：应用同时支持 Windows 与 Linux，
+ * Linux 上允许的 `a:b.md`、`con.md` 在 Windows 上无法创建也无法打开，
+ * 放行只会给跨平台文档埋坑。
+ */
+function isInvalidFileManagerEntryName(name) {
+  const normalizedName = normalizeFileManagerEntryName(name)
+  if (!normalizedName || normalizedName === '.' || normalizedName === '..') {
+    return true
+  }
+  if (/[\\/]/u.test(normalizedName)) {
+    return true
+  }
+
+  return WINDOWS_INVALID_ENTRY_NAME_CHARACTER_PATTERN.test(normalizedName)
+    || WINDOWS_RESERVED_ENTRY_NAME_PATTERN.test(normalizedName)
+    || TRAILING_DOT_PATTERN.test(normalizedName)
+}
+
+function createInvalidFileManagerEntryNameResult() {
+  return {
+    ok: false,
+    reason: 'invalid-file-manager-entry-name',
+  }
+}
+
+function createFileManagerEntryAlreadyExistsResult(targetPath) {
+  return {
+    ok: false,
+    reason: 'file-manager-entry-already-exists',
+    path: targetPath || null,
+  }
+}
+
+/**
+ * 创建失败（非法名、保留名、路径超长、权限不足、磁盘异常等）。
+ *
+ * 必须以结构化结果回流，不能让异常穿过 IPC：
+ * 创建动作由菜单直接触发，renderer 侧没有任何地方 await 这个 Promise，
+ * 异常只会变成 unhandled rejection，界面表现为“点了没反应”。
+ */
+function createFileManagerEntryCreateFailedResult(targetPath, error) {
+  return {
+    ok: false,
+    reason: 'file-manager-entry-create-failed',
+    path: targetPath || null,
+    code: typeof error?.code === 'string' ? error.code : null,
+  }
+}
+
+function getEntryExtension(entryName, isDirectory) {
+  if (isDirectory) {
+    return null
+  }
+
+  const extension = path.extname(entryName || '')
+  return extension ? extension.toLowerCase() : null
+}
+
+const SKIPPABLE_DIRECTORY_ENTRY_STAT_ERROR_CODE_SET = new Set(['ENOENT', 'EPERM', 'EACCES'])
+const DIRECTORY_ENTRY_STAT_BATCH_SIZE = 32
+
+function shouldSkipDirectoryEntryStatError(error) {
+  return SKIPPABLE_DIRECTORY_ENTRY_STAT_ERROR_CODE_SET.has(error?.code)
+}
+
+function normalizeIncludeModifiedTime(value) {
+  return value === true
+}
+
+function isIncludeModifiedTimeOptionSpecified(value) {
+  return value === true || value === false
+}
+
+async function isExistingDirectory(fsModule, directoryPath) {
+  if (!isNonEmptyString(directoryPath)) {
+    return false
+  }
+
+  if (!await fsModule.pathExists(directoryPath)) {
+    return false
+  }
+
+  const stat = await fsModule.stat(directoryPath)
+  return stat?.isDirectory?.() === true
+}
+
+async function resolveDirectoryEntryIsDirectory(directoryEntry, getStat) {
+  if (typeof directoryEntry?.isDirectory === 'function' && directoryEntry.isDirectory() === true) {
+    return true
+  }
+
+  if (typeof directoryEntry?.isFile === 'function' && directoryEntry.isFile() === true) {
+    return false
+  }
+
+  if (typeof directoryEntry?.isSymbolicLink === 'function' && directoryEntry.isSymbolicLink() === true) {
+    // symlink、junction 等条目无法通过 Dirent 直接确认目标类型时，必须回退 stat。
+    return (await getStat()).isDirectory()
+  }
+
+  if (typeof directoryEntry?.isDirectory === 'function') {
+    return false
+  }
+
+  return (await getStat()).isDirectory()
+}
+
+async function normalizeDirectoryEntry(fsModule, directoryPath, directoryEntry, options = {}) {
+  const entryPath = path.join(directoryPath, directoryEntry.name)
+  let stat = null
+  const includeModifiedTime = normalizeIncludeModifiedTime(options.includeModifiedTime)
+  const getStat = async () => {
+    if (!stat) {
+      stat = await fsModule.stat(entryPath)
+    }
+    return stat
+  }
+  const isDirectory = await resolveDirectoryEntryIsDirectory(directoryEntry, getStat)
+
+  const normalizedEntry = {
+    path: entryPath,
+    name: directoryEntry.name,
+    kind: isDirectory ? 'directory' : 'file',
+    extension: getEntryExtension(directoryEntry.name, isDirectory),
+  }
+
+  if (includeModifiedTime) {
+    const nextStat = await getStat()
+    normalizedEntry.modifiedTimeMs = Number.isFinite(nextStat?.mtimeMs) ? nextStat.mtimeMs : 0
+  }
+
+  return normalizedEntry
+}
+
+async function safeNormalizeDirectoryEntry(fsModule, directoryPath, directoryEntry, options = {}) {
+  try {
+    return await normalizeDirectoryEntry(fsModule, directoryPath, directoryEntry, options)
+  } catch (error) {
+    if (shouldSkipDirectoryEntryStatError(error)) {
+      // 扫描期间条目可能已删除或暂时无权限，跳过单项以避免整次目录刷新失效。
+      return null
+    }
+
+    throw error
+  }
+}
+
+async function collectDirectoryEntryList(fsModule, directoryPath, rawEntryList, options = {}) {
+  const entryList = []
+
+  for (let index = 0; index < rawEntryList.length; index += DIRECTORY_ENTRY_STAT_BATCH_SIZE) {
+    const normalizedBatch = await Promise.all(rawEntryList
+      .slice(index, index + DIRECTORY_ENTRY_STAT_BATCH_SIZE)
+      .map(directoryEntry => safeNormalizeDirectoryEntry(fsModule, directoryPath, directoryEntry, options)))
+
+    normalizedBatch.forEach((normalizedEntry) => {
+      if (normalizedEntry) {
+        entryList.push(normalizedEntry)
+      }
+    })
+  }
+
+  return entryList
+}
+
+export async function readDirectoryStateAtPath({
+  fsModule = fs,
+  directoryPath,
+  activePath = null,
+  includeModifiedTime = false,
+}) {
+  if (!await isExistingDirectory(fsModule, directoryPath)) {
+    return createEmptyDirectoryState()
+  }
+
+  const rawEntryList = await fsModule.readdir(directoryPath, {
+    withFileTypes: true,
+  })
+  const entryList = await collectDirectoryEntryList(fsModule, directoryPath, rawEntryList, {
+    includeModifiedTime,
+  })
+
+  return {
+    mode: 'directory',
+    directoryPath,
+    activePath: isNonEmptyString(activePath) ? activePath : null,
+    entryList,
+  }
+}
+
+export async function resolveDirectoryStateFromSession({
+  fsModule = fs,
+  session,
+  includeModifiedTime = false,
+}) {
+  const currentDocumentPath = session?.documentSource?.path || null
+  if (isNonEmptyString(currentDocumentPath)) {
+    return await readDirectoryStateAtPath({
+      fsModule,
+      directoryPath: path.dirname(currentDocumentPath),
+      activePath: currentDocumentPath,
+      includeModifiedTime,
+    })
+  }
+
+  if (session?.documentSource?.missingReason !== 'recent-missing') {
+    return createEmptyDirectoryState()
+  }
+
+  const missingPath = session?.documentSource?.missingPath || null
+  if (!isNonEmptyString(missingPath)) {
+    return createEmptyDirectoryState()
+  }
+
+  const parentDirectoryPath = path.dirname(missingPath)
+  if (!await isExistingDirectory(fsModule, parentDirectoryPath)) {
+    return createEmptyDirectoryState()
+  }
+
+  return await readDirectoryStateAtPath({
+    fsModule,
+    directoryPath: parentDirectoryPath,
+    activePath: null,
+    includeModifiedTime,
+  })
+}
+
+function resolveWindowDirectoryBinding(directoryWatchService, windowId) {
+  return directoryWatchService?.getWindowDirectoryBinding?.(windowId) || null
+}
+
+function resolveWindowDirectoryReadContext(directoryWatchService, windowId) {
+  return directoryWatchService?.getWindowDirectoryReadContext?.(windowId)
+    || resolveWindowDirectoryBinding(directoryWatchService, windowId)
+}
+
+function resolveDirectoryClearer(directoryWatchService) {
+  if (typeof directoryWatchService?.clearWindowDirectory === 'function') {
+    return directoryWatchService.clearWindowDirectory.bind(directoryWatchService)
+  }
+
+  if (typeof directoryWatchService?.stopWindowDirectory === 'function') {
+    return directoryWatchService.stopWindowDirectory.bind(directoryWatchService)
+  }
+
+  return null
+}
+
+function isDirectoryBindingMatched(bindingResult, {
+  directoryPath,
+  activePath = null,
+}) {
+  if (bindingResult?.ok !== true) {
+    return false
+  }
+
+  return bindingResult.directoryPath === directoryPath
+    && (bindingResult.activePath || null) === (activePath || null)
+}
+
+function createOpenDirectoryWatchFailedResult() {
+  return {
+    ok: false,
+    reason: 'open-directory-watch-failed',
+  }
+}
+
+function isFileManagerFailureResult(result) {
+  return result?.ok === false
+}
+
+export function createDocumentFileManagerService({
+  store,
+  fsModule = fs,
+  directoryWatchService = null,
+} = {}) {
+  const clearWindowDirectory = resolveDirectoryClearer(directoryWatchService)
+
+  function getCurrentSession(windowId) {
+    const normalizedWindowId = normalizeWindowId(windowId)
+    if (normalizedWindowId == null || !store) {
+      return null
+    }
+
+    return store.getSessionByWindowId(normalizedWindowId)
+  }
+
+  async function resolveWindowDirectoryState(windowId, includeModifiedTimeOverride = null) {
+    const currentBinding = resolveWindowDirectoryReadContext(directoryWatchService, windowId)
+    const includeModifiedTime = isIncludeModifiedTimeOptionSpecified(includeModifiedTimeOverride)
+      ? includeModifiedTimeOverride
+      : normalizeIncludeModifiedTime(currentBinding?.includeModifiedTime)
+    if (currentBinding?.directoryPath) {
+      return await readDirectoryStateAtPath({
+        fsModule,
+        directoryPath: currentBinding.directoryPath,
+        activePath: currentBinding.activePath || null,
+        includeModifiedTime,
+      })
+    }
+
+    return await resolveDirectoryStateFromSession({
+      fsModule,
+      session: getCurrentSession(windowId),
+      includeModifiedTime,
+    })
+  }
+
+  async function resolveExplicitDirectoryState(windowId, directoryPath, includeModifiedTime = false) {
+    const currentSession = getCurrentSession(windowId)
+    const currentDocumentPath = currentSession?.documentSource?.path || null
+    const activePath = isNonEmptyString(currentDocumentPath)
+      && path.dirname(currentDocumentPath) === directoryPath
+      ? currentDocumentPath
+      : null
+
+    return await readDirectoryStateAtPath({
+      fsModule,
+      directoryPath,
+      activePath,
+      includeModifiedTime,
+    })
+  }
+
+  async function getDirectoryState({
+    windowId,
+    directoryPath = null,
+    includeModifiedTime = undefined,
+  }) {
+    const hasRequestedIncludeModifiedTime = isIncludeModifiedTimeOptionSpecified(includeModifiedTime)
+    const requestedIncludeModifiedTime = normalizeIncludeModifiedTime(includeModifiedTime)
+    // renderer 显式指定目录时，必须以该目录为准，不能继续沿用旧 binding。
+    const directoryState = isNonEmptyString(directoryPath)
+      ? await resolveExplicitDirectoryState(windowId, directoryPath, requestedIncludeModifiedTime)
+      : await resolveWindowDirectoryState(
+          windowId,
+          hasRequestedIncludeModifiedTime ? requestedIncludeModifiedTime : null,
+        )
+
+    if (!directoryState.directoryPath) {
+      await clearWindowDirectory?.(windowId)
+      return directoryState
+    }
+
+    const ensureWindowDirectory = directoryWatchService?.ensureWindowDirectory
+    if (typeof ensureWindowDirectory === 'function') {
+      const bindingResult = await ensureWindowDirectory(windowId, directoryState.directoryPath, {
+        activePath: directoryState.activePath,
+        includeModifiedTime: isNonEmptyString(directoryPath)
+          ? requestedIncludeModifiedTime
+          : hasRequestedIncludeModifiedTime
+            ? requestedIncludeModifiedTime
+            : normalizeIncludeModifiedTime(resolveWindowDirectoryReadContext(directoryWatchService, windowId)?.includeModifiedTime),
+      })
+      if (!isDirectoryBindingMatched(bindingResult, {
+        directoryPath: directoryState.directoryPath,
+        activePath: directoryState.activePath,
+      })) {
+        return createOpenDirectoryWatchFailedResult()
+      }
+    }
+
+    return directoryState
+  }
+
+  function resolveCurrentDirectoryReadContextCandidate(windowId) {
+    const currentBinding = resolveWindowDirectoryReadContext(directoryWatchService, windowId)
+    if (isNonEmptyString(currentBinding?.directoryPath)) {
+      return {
+        directoryPath: currentBinding.directoryPath,
+        activePath: currentBinding.activePath || null,
+        includeModifiedTime: normalizeIncludeModifiedTime(currentBinding.includeModifiedTime),
+      }
+    }
+
+    const currentSession = getCurrentSession(windowId)
+    const currentDocumentPath = currentSession?.documentSource?.path || null
+    if (isNonEmptyString(currentDocumentPath)) {
+      return {
+        directoryPath: path.dirname(currentDocumentPath),
+        activePath: currentDocumentPath,
+        includeModifiedTime: false,
+      }
+    }
+
+    if (currentSession?.documentSource?.missingReason === 'recent-missing'
+      && isNonEmptyString(currentSession?.documentSource?.missingPath)) {
+      return {
+        directoryPath: path.dirname(currentSession.documentSource.missingPath),
+        activePath: null,
+        includeModifiedTime: false,
+      }
+    }
+
+    return null
+  }
+
+  async function resolveCurrentDirectoryPath(windowId) {
+    const directoryReadContext = resolveCurrentDirectoryReadContextCandidate(windowId)
+    const directoryPath = directoryReadContext?.directoryPath || null
+    if (!isNonEmptyString(directoryPath)) {
+      return {
+        ok: true,
+        directoryPath: null,
+      }
+    }
+    if (!await isExistingDirectory(fsModule, directoryPath)) {
+      await clearWindowDirectory?.(windowId)
+      return {
+        ok: true,
+        directoryPath: null,
+      }
+    }
+    const ensureWindowDirectory = directoryWatchService?.ensureWindowDirectory
+    if (typeof ensureWindowDirectory === 'function') {
+      const activePath = directoryReadContext?.activePath || null
+      const bindingResult = await ensureWindowDirectory(windowId, directoryPath, {
+        activePath,
+        includeModifiedTime: normalizeIncludeModifiedTime(directoryReadContext?.includeModifiedTime),
+      })
+      if (!isDirectoryBindingMatched(bindingResult, {
+        directoryPath,
+        activePath,
+      })) {
+        return createOpenDirectoryWatchFailedResult()
+      }
+    }
+
+    return {
+      ok: true,
+      directoryPath,
+    }
+  }
+
+  async function syncCurrentDirectoryOptions({
+    windowId,
+    includeModifiedTime = false,
+  }) {
+    const currentBinding = resolveWindowDirectoryReadContext(directoryWatchService, windowId)
+    if (!currentBinding?.directoryPath) {
+      return {
+        ok: true,
+        synced: false,
+        directoryPath: null,
+        activePath: null,
+        includeModifiedTime: normalizeIncludeModifiedTime(includeModifiedTime),
+      }
+    }
+
+    const ensureWindowDirectory = directoryWatchService?.ensureWindowDirectory
+    if (typeof ensureWindowDirectory !== 'function') {
+      return {
+        ok: true,
+        synced: false,
+        directoryPath: currentBinding.directoryPath,
+        activePath: currentBinding.activePath || null,
+        includeModifiedTime: normalizeIncludeModifiedTime(currentBinding.includeModifiedTime),
+      }
+    }
+
+    const nextIncludeModifiedTime = normalizeIncludeModifiedTime(includeModifiedTime)
+    const activePath = currentBinding.activePath || null
+    const bindingResult = await ensureWindowDirectory(windowId, currentBinding.directoryPath, {
+      activePath,
+      includeModifiedTime: nextIncludeModifiedTime,
+    })
+    if (!isDirectoryBindingMatched(bindingResult, {
+      directoryPath: currentBinding.directoryPath,
+      activePath,
+    })) {
+      return createOpenDirectoryWatchFailedResult()
+    }
+
+    const nextBinding = resolveWindowDirectoryReadContext(directoryWatchService, windowId) || currentBinding
+    return {
+      ok: true,
+      synced: true,
+      directoryPath: nextBinding.directoryPath || currentBinding.directoryPath,
+      activePath: nextBinding.activePath || activePath,
+      includeModifiedTime: normalizeIncludeModifiedTime(nextBinding.includeModifiedTime),
+    }
+  }
+
+  async function openDirectory({
+    windowId,
+    directoryPath,
+    includeModifiedTime = false,
+  }) {
+    const currentSession = getCurrentSession(windowId)
+    const currentDocumentPath = currentSession?.documentSource?.path || null
+    const activePath = isNonEmptyString(currentDocumentPath)
+      && path.dirname(currentDocumentPath) === directoryPath
+      ? currentDocumentPath
+      : null
+
+    const bindingResult = await directoryWatchService?.rebindWindowDirectory?.(windowId, directoryPath, {
+      activePath,
+      includeModifiedTime,
+    })
+    if (!isDirectoryBindingMatched(bindingResult, {
+      directoryPath,
+      activePath,
+    })) {
+      return createOpenDirectoryWatchFailedResult()
+    }
+
+    return await getDirectoryState({
+      windowId,
+      includeModifiedTime,
+    })
+  }
+
+  async function createFolder({ windowId, name }) {
+    const nextName = normalizeFileManagerEntryName(name)
+    if (isInvalidFileManagerEntryName(nextName)) {
+      return createInvalidFileManagerEntryNameResult()
+    }
+
+    const directoryPathResult = await resolveCurrentDirectoryPath(windowId)
+    if (isFileManagerFailureResult(directoryPathResult)) {
+      return directoryPathResult
+    }
+
+    const directoryPath = directoryPathResult.directoryPath || null
+    if (!directoryPath) {
+      return createEmptyDirectoryState()
+    }
+
+    const nextPath = path.join(directoryPath, nextName)
+    if (await fsModule.pathExists(nextPath)) {
+      return createFileManagerEntryAlreadyExistsResult(nextPath)
+    }
+
+    try {
+      await fsModule.mkdir(nextPath)
+    } catch (error) {
+      if (error?.code === 'EEXIST') {
+        return createFileManagerEntryAlreadyExistsResult(nextPath)
+      }
+      return createFileManagerEntryCreateFailedResult(nextPath, error)
+    }
+
+    return await getDirectoryState({ windowId })
+  }
+
+  async function createMarkdown({ windowId, name }) {
+    const nextName = normalizeFileManagerEntryName(name)
+    if (isInvalidFileManagerEntryName(nextName)) {
+      return createInvalidFileManagerEntryNameResult()
+    }
+
+    const directoryPathResult = await resolveCurrentDirectoryPath(windowId)
+    if (isFileManagerFailureResult(directoryPathResult)) {
+      return directoryPathResult
+    }
+
+    const directoryPath = directoryPathResult.directoryPath || null
+    if (!directoryPath) {
+      return {
+        path: null,
+        directoryState: createEmptyDirectoryState(),
+      }
+    }
+
+    const nextPath = appendMarkdownExtension(path.join(directoryPath, nextName))
+    if (await fsModule.pathExists(nextPath)) {
+      return createFileManagerEntryAlreadyExistsResult(nextPath)
+    }
+
+    try {
+      await fsModule.writeFile(nextPath, '', {
+        encoding: 'utf8',
+        flag: 'wx',
+      })
+    } catch (error) {
+      if (error?.code === 'EEXIST') {
+        return createFileManagerEntryAlreadyExistsResult(nextPath)
+      }
+      return createFileManagerEntryCreateFailedResult(nextPath, error)
+    }
+
+    return {
+      path: nextPath,
+      directoryState: await getDirectoryState({ windowId }),
+    }
+  }
+
+  return {
+    createFolder,
+    createMarkdown,
+    getDirectoryState,
+    openDirectory,
+    syncCurrentDirectoryOptions,
+    readDirectoryState: async ({
+      directoryPath,
+      activePath = null,
+      includeModifiedTime = false,
+    }) => {
+      return await readDirectoryStateAtPath({
+        fsModule,
+        directoryPath,
+        activePath,
+        includeModifiedTime,
+      })
+    },
+    resolveDirectoryStateFromSession: async (session, options = {}) => {
+      return await resolveDirectoryStateFromSession({
+        fsModule,
+        session,
+        includeModifiedTime: options?.includeModifiedTime === true,
+      })
+    },
+  }
+}
+
+export default {
+  createDocumentFileManagerService,
+  createEmptyDirectoryState,
+  readDirectoryStateAtPath,
+  resolveDirectoryStateFromSession,
+}

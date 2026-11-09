@@ -1,0 +1,65 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { BrowserWindow, shell } from 'electron'
+import configUtil from '../../data/configUtil.js'
+import { WINDOW_ICON_PATH } from '../appIconUtil.js'
+import { isDevServerMode } from '../webSourceUtil.js'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+let aboutWin
+
+export default {
+  get: () => aboutWin,
+  channel: {
+    'open-about': () => {
+      if (aboutWin) {
+        aboutWin.show()
+        return
+      }
+      const globalTheme = configUtil.getConfig()?.theme?.global === 'dark' ? 'dark' : 'light'
+      aboutWin = new BrowserWindow({
+        frame: false,
+        icon: WINDOW_ICON_PATH,
+        title: 'About',
+        width: 600,
+        height: 400,
+        show: false,
+        maximizable: false,
+        resizable: false,
+        backgroundColor: globalTheme === 'dark' ? '#282c34' : '#ffffff',
+        webPreferences: {
+          preload: path.resolve(__dirname, '../../preload.js'),
+          additionalArguments: [`--wj-initial-theme=${globalTheme}`],
+        },
+      })
+      aboutWin.on('closed', () => {
+        aboutWin = null
+      })
+      // 通过默认浏览器打开链接
+      aboutWin.webContents.setWindowOpenHandler((details) => {
+        shell.openExternal(details.url).then(() => {})
+        return { action: 'deny' }
+      })
+      aboutWin.once('ready-to-show', () => {
+        aboutWin.show()
+      })
+      if (isDevServerMode()) {
+        aboutWin.loadURL('http://localhost:8080/#/about').then(() => {
+          aboutWin.webContents.openDevTools({ mode: 'undocked' })
+        })
+      } else {
+        aboutWin.loadFile(path.resolve(__dirname, '../../../web-dist/index.html'), { hash: 'about' }).then(() => {})
+      }
+    },
+    'about-minimize': () => {
+      aboutWin.minimize()
+    },
+    'about-close': () => {
+      // 先释放前台激活状态，避免隐藏后系统焦点残留在隐藏窗口上（electron#52124）
+      aboutWin.blur()
+      aboutWin.hide()
+    },
+  },
+}

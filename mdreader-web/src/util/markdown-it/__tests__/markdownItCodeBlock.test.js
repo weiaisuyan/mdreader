@@ -1,0 +1,237 @@
+import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+
+import MarkdownIt from 'markdown-it'
+
+import codeBlockPlugin from '../markdownItCodeBlock.js'
+
+const { test } = await import('node:test')
+
+function getCodeClassTokens(renderedHtml) {
+  const match = renderedHtml.match(/<code class="([^"]+)"/u)
+  assert.ok(match, '普通 fenced code block 必须输出带 class 的 code 节点')
+  return new Set(match[1].split(/\s+/u).filter(Boolean))
+}
+
+function getToolbarLangInfo(renderedHtml) {
+  const match = renderedHtml.match(/<div class="([^"]*\bpre-container-lang\b[^"]*)">([^<]*)<\/div>/u)
+  assert.ok(match, '普通 fenced code block 必须输出语言标签节点')
+  return {
+    classTokens: new Set(match[1].split(/\s+/u).filter(Boolean)),
+    text: match[2],
+  }
+}
+
+function countClassOccurrences(renderedHtml, className) {
+  const pattern = new RegExp(`class="[^"]*\\b${className}\\b[^"]*"`, 'gu')
+  return [...renderedHtml.matchAll(pattern)].length
+}
+
+function getSingleActionSlotToolbarStructure(renderedHtml) {
+  const match = renderedHtml.match(
+    /<div class="([^"]*\bpre-container-toolbar\b[^"]*)">\s*<div class="([^"]*\bpre-container-action-slot\b[^"]*)">\s*<div class="([^"]*\bpre-container-lang\b[^"]*)">([^<]*)<\/div>\s*<div class="([^"]*\bpre-container-copy\b[^"]*)"[^>]*><\/div>\s*<\/div>\s*<\/div>\s*<pre/u,
+  )
+
+  assert.ok(match, '显式语言代码块必须保持 toolbar -> action-slot -> lang/copy 的单槽位 DOM 结构')
+
+  return {
+    toolbarClassTokens: new Set(match[1].split(/\s+/u).filter(Boolean)),
+    actionSlotClassTokens: new Set(match[2].split(/\s+/u).filter(Boolean)),
+    langClassTokens: new Set(match[3].split(/\s+/u).filter(Boolean)),
+    langText: match[4],
+    copyClassTokens: new Set(match[5].split(/\s+/u).filter(Boolean)),
+  }
+}
+
+function assertSingleActionSlotToolbarContract(renderedHtml) {
+  const toolbarStructure = getSingleActionSlotToolbarStructure(renderedHtml)
+
+  assert.equal(countClassOccurrences(renderedHtml, 'pre-container-toolbar'), 1)
+  assert.equal(countClassOccurrences(renderedHtml, 'pre-container-action-slot'), 1)
+  assert.equal(countClassOccurrences(renderedHtml, 'pre-container-lang'), 1)
+  assert.equal(countClassOccurrences(renderedHtml, 'pre-container-copy'), 1)
+  assert.equal(toolbarStructure.toolbarClassTokens.has('pre-container-toolbar'), true)
+  assert.equal(toolbarStructure.actionSlotClassTokens.has('pre-container-action-slot'), true)
+  assert.equal(toolbarStructure.langClassTokens.has('pre-container-lang'), true)
+  assert.equal(toolbarStructure.copyClassTokens.has('pre-container-copy'), true)
+  assert.doesNotMatch(renderedHtml, /<div class="[^"]*\bpre-container-toolbar\b[^"]*">\s*<div class="[^"]*\bpre-container-lang\b/u)
+  assert.doesNotMatch(renderedHtml, /<div class="[^"]*\bpre-container-toolbar\b[^"]*">\s*<div class="[^"]*\bpre-container-copy\b/u)
+
+  return toolbarStructure
+}
+
+function assertClassTokensDoNotContain(toolbarStructure, classKey, forbiddenTokens, messagePrefix) {
+  forbiddenTokens.forEach((forbiddenToken) => {
+    assert.equal(
+      toolbarStructure[classKey].has(forbiddenToken),
+      false,
+      `${messagePrefix} 不得继续依赖 utility class：${forbiddenToken}`,
+    )
+  })
+}
+
+function assertClassTokensDoNotMatch(toolbarStructure, classKey, forbiddenPatterns, messagePrefix) {
+  forbiddenPatterns.forEach((forbiddenPattern) => {
+    assert.equal(
+      [...toolbarStructure[classKey]].some(classToken => forbiddenPattern.test(classToken)),
+      false,
+      `${messagePrefix} 不得继续依赖 utility class 模式：${forbiddenPattern}`,
+    )
+  })
+}
+
+function toMermaidCacheKey(source) {
+  return createHash('sha256').update(source.replace(/\s+/gu, ''), 'utf8').digest('hex')
+}
+
+test('普通 fenced code block 必须输出可访问的复制按钮结构', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+
+  const renderedHtml = md.render('```js\nconsole.log(1)\n```')
+
+  assert.match(renderedHtml, /pre-container-copy/u)
+  assert.match(renderedHtml, /role="button"/u)
+  assert.match(renderedHtml, /tabindex="0"/u)
+  assert.equal(renderedHtml.includes('hidden'), false)
+  assert.match(renderedHtml, /title="复制"/u)
+  assert.match(renderedHtml, /aria-label="复制"/u)
+  // 复制按钮不再内联 base64 数据，点击/键盘复制由预览区事件委托处理
+  assert.doesNotMatch(renderedHtml, /onclick=|onkeydown=/u)
+})
+
+test('显式语言且可识别时必须输出标准高亮 DOM 契约', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+
+  const renderedHtml = md.render('```js\nconsole.log(1)\n```')
+  const codeClassTokens = getCodeClassTokens(renderedHtml)
+  const toolbarLangInfo = getToolbarLangInfo(renderedHtml)
+  const toolbarStructure = assertSingleActionSlotToolbarContract(renderedHtml)
+
+  assert.match(renderedHtml, /<pre(?:\s[^>]*)?>\s*<code class="[^"]*\bhljs\b/u)
+  assert.equal(codeClassTokens.has('hljs'), true)
+  assert.equal(codeClassTokens.has('language-js'), true)
+  assert.equal(codeClassTokens.has('language-javascript'), true)
+  assert.equal(toolbarLangInfo.classTokens.has('hidden'), false)
+  assert.equal(toolbarLangInfo.text, 'js')
+  assert.equal(toolbarStructure.langText, 'js')
+  assert.match(renderedHtml, /data-wj-hl-lang="javascript"/u)
+  assert.doesNotMatch(renderedHtml, /<pre class="[^"]*\bhljs\b/u)
+  assert.doesNotMatch(renderedHtml, /\b(?:relative|absolute|top-0|right-0)\b/u)
+})
+
+test('普通 fenced code block 的 action-slot/lang/copy 不得继续依赖 styling utility class', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+
+  const renderedHtml = md.render('```js\nconsole.log(1)\n```')
+  const toolbarStructure = assertSingleActionSlotToolbarContract(renderedHtml)
+
+  assertClassTokensDoNotContain(toolbarStructure, 'actionSlotClassTokens', ['flex', 'items-center', 'w-full'], 'action-slot 节点')
+  assertClassTokensDoNotContain(toolbarStructure, 'langClassTokens', ['font-bold'], '语言标签节点')
+  assertClassTokensDoNotContain(toolbarStructure, 'copyClassTokens', ['cursor-pointer'], '复制按钮节点')
+  assertClassTokensDoNotMatch(toolbarStructure, 'langClassTokens', [/^op-/u, /^font-size-/u, /^line-height-/u], '语言标签节点')
+  assertClassTokensDoNotMatch(toolbarStructure, 'copyClassTokens', [/^op-/u, /^hover:op-/u, /^font-size-/u, /^line-height-/u], '复制按钮节点')
+})
+
+test('显式语言但未识别时不得输出伪造的 language class 且仍显示原始标签', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+
+  const renderedHtml = md.render('```FooLang\nbody\n```')
+  const codeClassTokens = getCodeClassTokens(renderedHtml)
+  const toolbarLangInfo = getToolbarLangInfo(renderedHtml)
+  const toolbarStructure = assertSingleActionSlotToolbarContract(renderedHtml)
+
+  assert.deepEqual([...codeClassTokens].sort(), ['hljs'])
+  assert.doesNotMatch(renderedHtml, /\blanguage-[^"\s]+/u)
+  assert.doesNotMatch(renderedHtml, /data-wj-hl-lang=/u)
+  assert.equal(toolbarLangInfo.classTokens.has('hidden'), false)
+  assert.equal(toolbarLangInfo.text, 'FooLang')
+  assert.equal(toolbarStructure.langText, 'FooLang')
+})
+
+test('普通 fenced code block 不得把正文语义色 utility class 写死到 DOM', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+
+  const renderedHtml = md.render('```js\nconsole.log(1)\n```')
+
+  assert.doesNotMatch(renderedHtml, /var\(--wj-markdown-text-secondary\)/u)
+})
+
+test('未显式语言时渲染阶段只输出 hljs 与待高亮标记（检测语言在分帧高亮阶段补齐）', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+
+  const renderedHtml = md.render('```\n[core]\nname=value\n```')
+  const codeClassTokens = getCodeClassTokens(renderedHtml)
+  const toolbarLangInfo = getToolbarLangInfo(renderedHtml)
+  const toolbarStructure = assertSingleActionSlotToolbarContract(renderedHtml)
+
+  // 渲染阶段不做同步高亮，自动识别的语言类名由分帧高亮阶段补齐
+  assert.deepEqual([...codeClassTokens].sort(), ['hljs'])
+  assert.match(renderedHtml, /data-wj-hl-pending="1"/u)
+  assert.equal(toolbarLangInfo.classTokens.has('hidden'), true)
+  assert.equal(toolbarLangInfo.text, '')
+  assert.equal(toolbarStructure.langText, '')
+})
+
+test('未显式语言且自动识别失败时只保留 hljs class 且隐藏语言标签', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+
+  const renderedHtml = md.render('```\n12345\n```')
+  const codeClassTokens = getCodeClassTokens(renderedHtml)
+  const toolbarLangInfo = getToolbarLangInfo(renderedHtml)
+  const toolbarStructure = assertSingleActionSlotToolbarContract(renderedHtml)
+
+  assert.deepEqual([...codeClassTokens].sort(), ['hljs'])
+  assert.equal(toolbarLangInfo.classTokens.has('hidden'), true)
+  assert.equal(toolbarLangInfo.text, '')
+  assert.equal(toolbarStructure.langText, '')
+})
+
+test('普通 fenced code block 渲染阶段必须安全转义代码内容并标记待高亮', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+
+  const renderedHtml = md.render('```\n<div>& unsafe\n```')
+  const toolbarStructure = assertSingleActionSlotToolbarContract(renderedHtml)
+
+  assert.match(renderedHtml, /pre-container/u)
+  assert.match(renderedHtml, /pre-container-toolbar/u)
+  assert.match(renderedHtml, /<pre(?:\s[^>]*)?>\s*<code class="[^"]*\bhljs\b/u)
+  assert.match(renderedHtml, /data-wj-hl-pending="1"/u)
+  assert.match(renderedHtml, /&lt;div&gt;&amp; unsafe/u)
+  assert.doesNotMatch(renderedHtml, /<pre><code><div>& unsafe/u)
+  assert.equal(toolbarStructure.langText, '')
+})
+
+test('mermaid fenced code block 必须保持独立分支输出', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+  const source = 'graph TD\nA-->B'
+
+  const renderedHtml = md.render(`\`\`\`mermaid\n${source}\n\`\`\``)
+
+  assert.equal(renderedHtml.startsWith(`<pre class="mermaid" data-code="${toMermaidCacheKey(source)}"`), true)
+  assert.match(renderedHtml, />\s*graph TD\s*A-->B\s*<\/pre>/u)
+  assert.doesNotMatch(renderedHtml, /pre-container-toolbar/u)
+  assert.doesNotMatch(renderedHtml, /pre-container-copy/u)
+  assert.doesNotMatch(renderedHtml, /\bhljs\b/u)
+})
+
+test('mermaid fenced code block 的缓存键必须安全编码，不能被节点标签中的引号截断', () => {
+  const md = new MarkdownIt()
+  md.use(codeBlockPlugin)
+  const source = `flowchart TD
+    A["EntryAbility<br/>应用启动"] --> B["OfferDatabaseRuntime<br/>注册 Context"]`
+
+  const renderedHtml = md.render(`\`\`\`mermaid\n${source}\n\`\`\``)
+
+  assert.equal(renderedHtml.startsWith(`<pre class="mermaid" data-code="${toMermaidCacheKey(source)}"`), true)
+  assert.match(renderedHtml, />\s*flowchart TD[\s\S]*A\["EntryAbility<br\/>应用启动"\] --> B\["OfferDatabaseRuntime<br\/>注册 Context"\]\s*<\/pre>/u)
+  assert.doesNotMatch(renderedHtml, /data-code="flowchartTDA\["EntryAbility/u)
+})

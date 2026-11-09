@@ -1,0 +1,703 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+
+const { test } = await import('node:test')
+
+function readSource(relativePath) {
+  return fs.readFileSync(new URL(relativePath, import.meta.url), 'utf8')
+}
+
+function getStableThemeRootSelector(themeName) {
+  return `.wj-preview-theme.preview-theme-${themeName}`
+}
+
+function normalizeStableThemeRootSelector(selector) {
+  const legacyThemeRootMatch = selector.match(/^\.preview-theme-([a-z0-9-]+)$/u)
+
+  if (legacyThemeRootMatch) {
+    return getStableThemeRootSelector(legacyThemeRootMatch[1])
+  }
+
+  return selector
+}
+
+function getSelectorBlock(source, selector) {
+  const selectorBlocks = getSelectorBlocks(source, selector)
+  assert.notEqual(selectorBlocks.length, 0, `未找到选择器：${normalizeStableThemeRootSelector(selector)}`)
+
+  return selectorBlocks[0]
+}
+
+function getSelectorBlocks(source, selector) {
+  const normalizedSelector = normalizeStableThemeRootSelector(selector)
+  const selectorBlocks = []
+  let searchIndex = 0
+
+  while (searchIndex < source.length) {
+    const selectorIndex = source.indexOf(normalizedSelector, searchIndex)
+    if (selectorIndex === -1) {
+      break
+    }
+
+    const blockStart = source.indexOf('{', selectorIndex)
+    assert.notEqual(blockStart, -1, `${normalizedSelector} 缺少起始大括号`)
+
+    let braceDepth = 0
+    let blockEnd = -1
+
+    for (let i = blockStart; i < source.length; i++) {
+      const char = source[i]
+      if (char === '{') {
+        braceDepth++
+        continue
+      }
+      if (char === '}') {
+        braceDepth--
+        if (braceDepth === 0) {
+          blockEnd = i + 1
+          selectorBlocks.push(source.slice(blockStart, blockEnd))
+          searchIndex = blockEnd
+          break
+        }
+      }
+    }
+
+    if (blockEnd === -1) {
+      assert.fail(`${normalizedSelector} 没有正确闭合`)
+    }
+  }
+
+  return selectorBlocks
+}
+
+function getTopLevelNestedRuleEntries(blockSource) {
+  const blockBody = blockSource.slice(1, -1)
+  const ruleEntries = []
+  let braceDepth = 0
+  let bracketDepth = 0
+  let parenDepth = 0
+  let tokenStart = 0
+  let currentHeader = ''
+  let currentBlockStart = -1
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  let escaped = false
+
+  for (let i = 0; i < blockBody.length; i++) {
+    const currentChar = blockBody[i]
+
+    if (escaped) {
+      escaped = false
+      continue
+    }
+
+    if (currentChar === '\\') {
+      escaped = true
+      continue
+    }
+
+    if (!inDoubleQuote && currentChar === '\'') {
+      inSingleQuote = !inSingleQuote
+      continue
+    }
+
+    if (!inSingleQuote && currentChar === '"') {
+      inDoubleQuote = !inDoubleQuote
+      continue
+    }
+
+    if (inSingleQuote || inDoubleQuote) {
+      continue
+    }
+
+    if (currentChar === '[') {
+      bracketDepth++
+      continue
+    }
+
+    if (currentChar === ']') {
+      bracketDepth--
+      continue
+    }
+
+    if (currentChar === '(') {
+      parenDepth++
+      continue
+    }
+
+    if (currentChar === ')') {
+      parenDepth--
+      continue
+    }
+
+    if (bracketDepth > 0 || parenDepth > 0) {
+      continue
+    }
+
+    if (currentChar === '{') {
+      if (braceDepth === 0) {
+        currentHeader = blockBody.slice(tokenStart, i).trim()
+        currentBlockStart = i
+      }
+      braceDepth++
+      continue
+    }
+
+    if (currentChar === '}') {
+      braceDepth--
+      if (braceDepth === 0) {
+        if (currentHeader) {
+          ruleEntries.push({
+            selectorHeader: currentHeader,
+            blockSource: blockBody.slice(currentBlockStart, i + 1),
+          })
+        }
+        tokenStart = i + 1
+        currentHeader = ''
+        currentBlockStart = -1
+      }
+      continue
+    }
+
+    if (braceDepth === 0 && currentChar === ';') {
+      tokenStart = i + 1
+    }
+  }
+
+  return ruleEntries
+}
+
+function splitTopLevelSelectorEntries(selectorHeader) {
+  const selectorEntries = []
+  let tokenStart = 0
+  let bracketDepth = 0
+  let parenDepth = 0
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  let escaped = false
+
+  for (let i = 0; i < selectorHeader.length; i++) {
+    const currentChar = selectorHeader[i]
+
+    if (escaped) {
+      escaped = false
+      continue
+    }
+
+    if (currentChar === '\\') {
+      escaped = true
+      continue
+    }
+
+    if (!inDoubleQuote && currentChar === '\'') {
+      inSingleQuote = !inSingleQuote
+      continue
+    }
+
+    if (!inSingleQuote && currentChar === '"') {
+      inDoubleQuote = !inDoubleQuote
+      continue
+    }
+
+    if (inSingleQuote || inDoubleQuote) {
+      continue
+    }
+
+    if (currentChar === '[') {
+      bracketDepth++
+      continue
+    }
+
+    if (currentChar === ']') {
+      bracketDepth--
+      continue
+    }
+
+    if (currentChar === '(') {
+      parenDepth++
+      continue
+    }
+
+    if (currentChar === ')') {
+      parenDepth--
+      continue
+    }
+
+    if (currentChar === ',' && bracketDepth === 0 && parenDepth === 0) {
+      const selectorEntry = selectorHeader.slice(tokenStart, i).trim()
+
+      if (selectorEntry) {
+        selectorEntries.push(selectorEntry)
+      }
+
+      tokenStart = i + 1
+    }
+  }
+
+  const lastSelectorEntry = selectorHeader.slice(tokenStart).trim()
+
+  if (lastSelectorEntry) {
+    selectorEntries.push(lastSelectorEntry)
+  }
+
+  return selectorEntries
+}
+
+function stripLeadingRelativeSelectorPrefix(selectorEntry) {
+  let normalizedEntry = selectorEntry.trim()
+
+  while (normalizedEntry.startsWith('&')) {
+    normalizedEntry = normalizedEntry.slice(1).trimStart()
+  }
+
+  while (/^[>+~]/u.test(normalizedEntry)) {
+    normalizedEntry = normalizedEntry.slice(1).trimStart()
+  }
+
+  return normalizedEntry
+}
+
+function getLeadingFunctionalSelectorArguments(selectorEntry) {
+  const normalizedEntry = stripLeadingRelativeSelectorPrefix(selectorEntry)
+  const supportedFunctionalPseudoClasses = [':where(', ':is(']
+
+  for (const functionPrefix of supportedFunctionalPseudoClasses) {
+    if (!normalizedEntry.startsWith(functionPrefix)) {
+      continue
+    }
+
+    const argumentStart = functionPrefix.length
+    let parenDepth = 1
+    let inSingleQuote = false
+    let inDoubleQuote = false
+    let escaped = false
+
+    for (let i = argumentStart; i < normalizedEntry.length; i++) {
+      const currentChar = normalizedEntry[i]
+
+      if (escaped) {
+        escaped = false
+        continue
+      }
+
+      if (currentChar === '\\') {
+        escaped = true
+        continue
+      }
+
+      if (!inDoubleQuote && currentChar === '\'') {
+        inSingleQuote = !inSingleQuote
+        continue
+      }
+
+      if (!inSingleQuote && currentChar === '"') {
+        inDoubleQuote = !inDoubleQuote
+        continue
+      }
+
+      if (inSingleQuote || inDoubleQuote) {
+        continue
+      }
+
+      if (currentChar === '(') {
+        parenDepth++
+        continue
+      }
+
+      if (currentChar === ')') {
+        parenDepth--
+        if (parenDepth === 0) {
+          return normalizedEntry.slice(argumentStart, i)
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+function selectorEntryUsesDirectKbdSurface(selectorEntry) {
+  const normalizedEntry = stripLeadingRelativeSelectorPrefix(selectorEntry)
+
+  if (/^kbd(?=$|[:.[#])/u.test(normalizedEntry)) {
+    return true
+  }
+
+  const functionalArguments = getLeadingFunctionalSelectorArguments(normalizedEntry)
+
+  if (!functionalArguments) {
+    return false
+  }
+
+  return splitTopLevelSelectorEntries(functionalArguments)
+    .some(entry => selectorEntryUsesDirectKbdSurface(entry))
+}
+
+function selectorEntryTargetsPrimaryUnorderedList(selectorEntry) {
+  const normalizedEntry = stripLeadingRelativeSelectorPrefix(selectorEntry)
+
+  if (normalizedEntry === 'ul') {
+    return true
+  }
+
+  const functionalArguments = getLeadingFunctionalSelectorArguments(normalizedEntry)
+
+  if (!functionalArguments) {
+    return false
+  }
+
+  return splitTopLevelSelectorEntries(functionalArguments)
+    .some(entry => selectorEntryTargetsPrimaryUnorderedList(entry))
+}
+
+function assertThemeRootVariableEntry(source, selector, requiredVariables) {
+  const rootBlock = getSelectorBlock(source, selector)
+  const declaredVariableNames = new Set(
+    Array.from(rootBlock.matchAll(/(--wj-preview-[a-z0-9-]+)\s*:/gu), match => match[1]),
+  )
+
+  assert.notEqual(declaredVariableNames.size, 0, `${selector} 没有声明统一变量入口`)
+
+  requiredVariables.forEach((variableName) => {
+    assert.equal(
+      declaredVariableNames.has(variableName),
+      true,
+      `${selector} 缺少变量声明：${variableName}`,
+    )
+  })
+}
+
+/**
+ * fenced code block 与 mermaid 外壳职责已经迁出 preview theme contract，避免旧变量族继续留在协议层。
+ * @param {string} source
+ */
+function assertPreviewThemeContractDoesNotDeclareLegacyCodeBlockVariables(source) {
+  const declaredVariableNames = Array.from(
+    source.matchAll(/^\s*(--wj-preview-[a-z0-9-]+):/gmu),
+    match => match[1],
+  )
+  const forbiddenVariablePrefixes = [
+    '--wj-preview-pre-',
+    '--wj-preview-code-block-',
+    '--wj-preview-code-toolbar-',
+    '--wj-preview-mermaid-',
+  ]
+  const forbiddenVariableNames = declaredVariableNames
+    .filter(variableName => forbiddenVariablePrefixes.some(prefix => variableName.startsWith(prefix)))
+
+  assert.equal(
+    forbiddenVariableNames.length,
+    0,
+    `变量协议不应继续声明 fenced code block / mermaid 外壳变量：${forbiddenVariableNames.join(', ')}`,
+  )
+}
+
+function assertThemeRootVariableValue(source, selector, variableName, expectedValue) {
+  const rootBlock = getSelectorBlock(source, selector)
+
+  assert.match(
+    rootBlock,
+    new RegExp(`${variableName}\\s*:\\s*${expectedValue};`, 'u'),
+    `${selector} 的 ${variableName} 未保持预期值：${expectedValue}`,
+  )
+}
+
+function getDeclaredVariableNames(blockSource) {
+  return new Set(
+    Array.from(blockSource.matchAll(/(--wj-preview-[a-z0-9-]+)\s*:/gu), match => match[1]),
+  )
+}
+
+function getDarkThemeSelectorBlock(source, selector) {
+  const darkThemeBlock = getSelectorBlock(source, ':root[theme=\'dark\']')
+
+  return getSelectorBlock(darkThemeBlock, selector)
+}
+
+function getLightThemeSelectorBlock(source, selector) {
+  const lightThemeBlock = getSelectorBlock(source, ':root[theme=\'light\']')
+
+  return getSelectorBlock(lightThemeBlock, selector)
+}
+
+function assertDarkThemeBranchUsesVariableOverridesOnly(source, selector) {
+  const darkThemeSelectorBlock = getDarkThemeSelectorBlock(source, selector)
+  const normalizedBlockBody = darkThemeSelectorBlock
+    .slice(1, -1)
+    .replace(/\s+/gu, ' ')
+    .trim()
+
+  assert.equal(
+    /[{}]/u.test(normalizedBlockBody),
+    false,
+    `${selector} dark 分支存在非变量声明：嵌套规则`,
+  )
+
+  const remainingContent = normalizedBlockBody
+    .replace(/--wj-preview-[a-z0-9-]+\s*:[^;]+;\s*/gu, '')
+    .trim()
+
+  assert.equal(
+    remainingContent,
+    '',
+    `${selector} dark 分支存在非变量声明：${remainingContent}`,
+  )
+}
+
+function assertDarkThemeBranchHasRequiredVariables(source, selector, requiredVariables) {
+  const darkThemeSelectorBlock = getDarkThemeSelectorBlock(source, selector)
+  const declaredVariableNames = getDeclaredVariableNames(darkThemeSelectorBlock)
+
+  requiredVariables.forEach((variableName) => {
+    assert.equal(
+      declaredVariableNames.has(variableName),
+      true,
+      `${selector} dark 分支缺少变量声明：${variableName}`,
+    )
+  })
+}
+
+function assertDarkThemeBranchVariableValue(source, selector, variableName, expectedValue) {
+  const darkThemeSelectorBlock = getDarkThemeSelectorBlock(source, selector)
+
+  assert.match(
+    darkThemeSelectorBlock,
+    new RegExp(`${variableName}\\s*:\\s*${expectedValue};`, 'u'),
+    `${selector} dark 分支的 ${variableName} 未保持预期值：${expectedValue}`,
+  )
+}
+
+function assertDarkThemeBranchPreservesInlineCodeSeparation(source, selector) {
+  const darkThemeSelectorBlock = getDarkThemeSelectorBlock(source, selector)
+  const declaredVariableNames = getDeclaredVariableNames(darkThemeSelectorBlock)
+
+  declaredVariableNames.forEach((variableName) => {
+    const isPreVariable = variableName.startsWith('--wj-preview-pre-')
+    const isCodeVariable = variableName.includes('code')
+    const isInlineCodeVariable = variableName.startsWith('--wj-preview-inline-code-')
+
+    if ((isCodeVariable && !isInlineCodeVariable) || isPreVariable) {
+      assert.fail(`${selector} dark 分支不应覆盖非 inline code 语义变量：${variableName}`)
+    }
+  })
+}
+
+/**
+ * 从主题根块中提取标题字号，避免仅靠字符串匹配判断层级是否递减。
+ * @param {string} source
+ * @param {string} selector
+ * @param {number} level
+ */
+function getThemeHeadingFontSizePx(source, selector, level) {
+  const rootBlock = getSelectorBlock(source, selector)
+  const match = rootBlock.match(new RegExp(`--wj-preview-h${level}-font-size:\\s*([0-9.]+)px;`, 'u'))
+
+  assert.ok(match, `${selector} 缺少 h${level} 标题字号变量`)
+
+  return Number(match[1])
+}
+
+/**
+ * 校验受影响主题已经停止用 kbd 选择器承担主外观，后续应统一走变量协议。
+ * @param {string} source
+ * @param {string} selector
+ */
+function assertThemeDoesNotUseKbdSelectorForPrimarySurface(source, selector) {
+  const stableThemeBlocks = getSelectorBlocks(source, selector)
+
+  stableThemeBlocks.forEach((stableThemeBlock) => {
+    const stableThemeRuleEntries = getTopLevelNestedRuleEntries(stableThemeBlock)
+    const primaryKbdRuleEntry = stableThemeRuleEntries.find(({ selectorHeader }) => {
+      return splitTopLevelSelectorEntries(selectorHeader)
+        .some(entry => selectorEntryUsesDirectKbdSurface(entry))
+    })
+
+    assert.equal(
+      Boolean(primaryKbdRuleEntry),
+      false,
+      `${selector} 不得继续通过稳定根块内的直接 kbd 选择器承担主外观`,
+    )
+  })
+}
+
+/**
+ * 校验主题根变量块不再直接书写背景纹理属性，而是交给统一变量协议承接。
+ * @param {string} source
+ * @param {string} selector
+ */
+function assertThemeRootDoesNotUseDirectBackgroundTextureProperties(source, selector) {
+  const rootBlock = getSelectorBlock(source, selector)
+  const blockBodyLines = rootBlock
+    .slice(1, -1)
+    .split(/\r?\n/u)
+    .map(line => line.trim())
+    .filter(Boolean)
+
+  blockBodyLines.forEach((line) => {
+    assert.equal(
+      /^(?:background-image|background-size|background-position)\s*:/u.test(line),
+      false,
+      `${selector} 主题根块不得继续直接声明背景纹理属性：${line}`,
+    )
+  })
+}
+
+/**
+ * 校验主题不再通过特例移除主层级 ul 的默认项目符号。
+ * @param {string} source
+ * @param {string} selector
+ */
+function assertThemeDoesNotRemovePrimaryUnorderedListMarker(source, selector) {
+  const stableThemeBlocks = getSelectorBlocks(source, selector)
+
+  stableThemeBlocks.forEach((stableThemeBlock) => {
+    const stableThemeRuleEntries = getTopLevelNestedRuleEntries(stableThemeBlock)
+    const primaryUnorderedListRuleEntry = stableThemeRuleEntries.find(({ selectorHeader }) => {
+      return splitTopLevelSelectorEntries(selectorHeader)
+        .some(entry => selectorEntryTargetsPrimaryUnorderedList(entry))
+    })
+
+    if (!primaryUnorderedListRuleEntry) {
+      return
+    }
+
+    assert.doesNotMatch(
+      primaryUnorderedListRuleEntry.blockSource,
+      /list-style(?:-type)?\s*:\s*none\s*;/u,
+      `${selector} 不得再移除无序列表标记`,
+    )
+  })
+}
+
+/**
+ * 校验 smart-blue 仍可保留标题人格相关特例，但不再把其他结构样式塞回稳定根块。
+ * @param {string} source
+ */
+function assertSmartBlueThemePreservesHeadingPersonaSelectors(source) {
+  const stableSmartBlueSelector = getStableThemeRootSelector('smart-blue')
+  const smartBlueStableBlocks = getSelectorBlocks(source, stableSmartBlueSelector)
+  const smartBlueSpecialBlock = smartBlueStableBlocks.find((smartBlueBlock) => {
+    const smartBlueRuleEntries = getTopLevelNestedRuleEntries(smartBlueBlock)
+    const smartBlueTopLevelSelectorHeaders = smartBlueRuleEntries
+      .map(({ selectorHeader }) => selectorHeader)
+
+    return smartBlueTopLevelSelectorHeaders.includes('h1')
+      && smartBlueTopLevelSelectorHeaders.includes('h2')
+  })
+
+  assert.ok(smartBlueSpecialBlock, 'smart-blue 主题必须保留包含 h1/h2 的稳定根标题人格块')
+
+  smartBlueStableBlocks.forEach((smartBlueBlock) => {
+    const smartBlueRuleEntries = getTopLevelNestedRuleEntries(smartBlueBlock)
+    const smartBlueTopLevelSelectorHeaders = smartBlueRuleEntries
+      .map(({ selectorHeader }) => selectorHeader)
+    const smartBlueTableRuleEntry = smartBlueRuleEntries
+      .find(({ selectorHeader }) => selectorHeader === 'table')
+    const smartBlueTableNestedSelectorHeaders = smartBlueTableRuleEntry
+      ? getTopLevelNestedRuleEntries(smartBlueTableRuleEntry.blockSource)
+          .map(({ selectorHeader }) => selectorHeader)
+      : []
+
+    assert.equal(smartBlueTopLevelSelectorHeaders.includes('p + p'), false)
+    assert.equal(smartBlueTopLevelSelectorHeaders.includes('h3'), false)
+    assert.equal(smartBlueTopLevelSelectorHeaders.includes('ol'), false)
+    assert.equal(smartBlueTopLevelSelectorHeaders.includes('ul'), false)
+    assert.equal(smartBlueTopLevelSelectorHeaders.includes('li'), false)
+    assert.equal(smartBlueTableNestedSelectorHeaders.includes('tr'), false)
+  })
+
+  assert.match(smartBlueSpecialBlock, /(?:^|\n)\s*h1\s*\{/u)
+  assert.match(smartBlueSpecialBlock, /(?:^|\n)\s*h2\s*\{/u)
+}
+
+test('基础层相邻段落节奏应通过 margin-top 变量表达，避免污染 blockquote 多段间距', () => {
+  const contractSource = readSource('../preview-theme/preview-theme-contract.scss')
+  const baseSource = readSource('../preview-theme/preview-theme-base.scss')
+
+  assert.match(
+    contractSource,
+    /--wj-preview-adjacent-paragraph-margin-top:\s*var\(--wj-preview-space-none\);/u,
+  )
+  assert.equal(contractSource.includes('--wj-preview-adjacent-paragraph-padding-top'), false)
+  assert.match(
+    baseSource,
+    /:where\(p \+ p\)\s*\{[\s\S]*?margin-top:\s*var\(--wj-preview-adjacent-paragraph-margin-top\);[\s\S]*?\}/u,
+  )
+  assert.equal(baseSource.includes('padding-top: var(--wj-preview-adjacent-paragraph-margin-top);'), false)
+})
+
+test('preview-theme-contract 不得继续声明 fenced code block 与 mermaid 外壳变量', () => {
+  const contractSource = readSource('../preview-theme/preview-theme-contract.scss')
+
+  assertPreviewThemeContractDoesNotDeclareLegacyCodeBlockVariables(contractSource)
+})
+
+test('旧职责变量断言必须识别 code block 变量残留', () => {
+  const compliantContractSource = `.wj-preview-theme {
+  --wj-preview-inline-code-text-color: inherit;
+  --wj-preview-details-border: 1px solid var(--wj-markdown-border-primary);
+}`
+  const mutatedContractSource = `${compliantContractSource}
+  --wj-preview-code-block-background-color: var(--wj-markdown-bg-secondary);`
+
+  assert.doesNotThrow(() => assertPreviewThemeContractDoesNotDeclareLegacyCodeBlockVariables(compliantContractSource))
+  assert.throws(() => assertPreviewThemeContractDoesNotDeclareLegacyCodeBlockVariables(mutatedContractSource), /code-block/u)
+})
+
+test('kbd 主外观断言不应把稳定根块外或更具体局部特例误判为主路径', () => {
+  const source = `kbd {
+  color: red;
+}
+
+.wj-preview-theme.preview-theme-smart-blue {
+  --wj-preview-kbd-text-color: #135ce0;
+
+  .shortcut-hint kbd {
+    color: inherit;
+  }
+}`
+
+  assert.doesNotThrow(
+    () => assertThemeDoesNotUseKbdSelectorForPrimarySurface(source, '.preview-theme-smart-blue'),
+  )
+})
+
+test('kbd 主外观断言必须识别 :where(.shortcut, kbd) 这类函数选择器中的直接 kbd', () => {
+  const source = `.wj-preview-theme.preview-theme-smart-blue {
+  :where(.shortcut, kbd) {
+    color: #135ce0;
+  }
+}`
+
+  assert.throws(
+    () => assertThemeDoesNotUseKbdSelectorForPrimarySurface(source, '.preview-theme-smart-blue'),
+    /直接 kbd 选择器承担主外观/u,
+  )
+})
+
+test('github 主题稳定根块不得继续承接音频表面与几何变量', () => {
+  const source = readSource('../preview-theme/theme/github.scss')
+  const stableRootBlock = getSelectorBlocks(source, '.preview-theme-github')
+    .find(block => block.includes('--wj-preview-text-color'))
+
+  assert.ok(stableRootBlock, 'github 主题稳定根块必须存在统一变量入口')
+  assert.doesNotMatch(stableRootBlock, /--wj-preview-audio-background-color\s*:/u)
+  assert.doesNotMatch(stableRootBlock, /--wj-preview-audio-border\s*:/u)
+  assert.doesNotMatch(stableRootBlock, /--wj-preview-audio-border-radius\s*:/u)
+})
+
+test('github 主题亮暗分支必须只同步音频色彩模式', () => {
+  const source = readSource('../preview-theme/theme/github.scss')
+  const darkRootBlock = getDarkThemeSelectorBlock(source, '.preview-theme-github')
+  const lightRootBlock = getLightThemeSelectorBlock(source, '.preview-theme-github')
+
+  assert.match(darkRootBlock, /--wj-preview-audio-color-scheme:\s*dark;/u)
+  assert.match(lightRootBlock, /--wj-preview-audio-color-scheme:\s*light;/u)
+  assert.doesNotMatch(darkRootBlock, /--wj-preview-audio-background-color\s*:/u)
+  assert.doesNotMatch(darkRootBlock, /--wj-preview-audio-border\s*:/u)
+  assert.doesNotMatch(darkRootBlock, /--wj-preview-audio-border-radius\s*:/u)
+  assert.doesNotMatch(lightRootBlock, /--wj-preview-audio-background-color\s*:/u)
+  assert.doesNotMatch(lightRootBlock, /--wj-preview-audio-border\s*:/u)
+  assert.doesNotMatch(lightRootBlock, /--wj-preview-audio-border-radius\s*:/u)
+})
+
