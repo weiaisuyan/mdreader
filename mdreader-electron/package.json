@@ -75,7 +75,7 @@
       "installerIcon": "./icon/favicon.ico",
       "uninstallerIcon": "./icon/favicon.ico",
       "installerHeaderIcon": "./icon/favicon.ico",
-      "perMachine": true,
+      "perMachine": false,
       "include": "./installer.nsh"
     },
     "win": {
