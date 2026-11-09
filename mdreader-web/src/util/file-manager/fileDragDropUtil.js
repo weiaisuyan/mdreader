@@ -138,6 +138,53 @@ function looksLikeFilePath(value) {
  * @param {DragEvent} event 原生 dragstart 事件
  * @returns {boolean} 是否真的发起了拖拽
  */
+/**
+ * 拖拽时显示的浮层：只画文件名，不用浏览器默认的「拖拽元素快照」。
+ *
+ * 不设 drag image 时，Chromium 会把**被拖的那个列表项整块**做成半透明快照跟着指针走 ——
+ * 文件列表项里如果带缩略图，用户看到的就是一张文件内容缩略图，完全认不出自己在拖哪个文件。
+ *
+ * 这里现造一个只含文件名的小块交给 `setDragImage`。
+ * 约束：
+ * 1. 元素必须已经在文档里并且有布局，否则浏览器取不到快照（不能用 `display:none`），
+ *    所以放在屏幕外 `top:-1000px` 而不是隐藏；
+ * 2. 快照是同步取的，移除必须推迟到下一轮事件循环，否则等于没设。
+ *
+ * @param {DataTransfer} dataTransfer 拖拽数据对象
+ * @param {string} path 被拖文件的绝对路径
+ */
+function applyFileNameDragImage(dataTransfer, path) {
+  try {
+    const fileName = String(path).split(/[\/]/).pop() || path
+    const ghost = document.createElement('div')
+    ghost.textContent = fileName
+    ghost.setAttribute('aria-hidden', 'true')
+    ghost.style.cssText = [
+      'position:fixed',
+      'top:-1000px',
+      'left:-1000px',
+      'max-width:240px',
+      'padding:4px 10px',
+      'border-radius:6px',
+      'background:var(--wj-markdown-bg-secondary, #1b1722)',
+      'color:var(--wj-markdown-text-primary, #e6e6e6)',
+      'border:1px solid var(--wj-window-border, rgba(14, 210, 247, 0.5))',
+      'font-size:13px',
+      'line-height:20px',
+      'white-space:nowrap',
+      'overflow:hidden',
+      'text-overflow:ellipsis',
+      'box-shadow:0 4px 12px rgba(0, 0, 0, 0.35)',
+      'pointer-events:none',
+    ].join(';')
+    document.body.appendChild(ghost)
+    dataTransfer.setDragImage(ghost, 12, 14)
+    setTimeout(() => { ghost.remove() }, 0)
+  } catch {
+    // 设置失败就用浏览器默认行为，不影响拖拽本身
+  }
+}
+
 export function startFileDrag(path, event) {
   if (typeof path !== 'string' || !path) {
     return false
@@ -157,6 +204,7 @@ export function startFileDrag(path, event) {
     dataTransfer.setData(FILE_PATH_MIME, path)
     dataTransfer.setData('text/plain', path)
     dataTransfer.effectAllowed = 'copy'
+    applyFileNameDragImage(dataTransfer, path)
   }
   return true
 }

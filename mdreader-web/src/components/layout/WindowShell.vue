@@ -104,7 +104,17 @@ const contentStyle = computed(() => ({
  */
 const borderStyle = computed(() => ({
   position: 'absolute',
-  inset: '0',
+  /**
+   * 内缩 1px 而不是贴 0。
+   *
+   * 窗口虽然用 `thickFrame: false` 去掉了可调边框，但手工补回的 `WS_CAPTION`
+   * 里带 `WS_BORDER` 位，系统仍保留 1px 非客户区（实测左/上/右各 1px、下 0）。
+   * 边框 div 贴着 0 画时，那 1px 被窗口边缘裁掉，1.33px 的边框只剩圆角弧线露一点，
+   * 直边完全看不见 —— 表现就是「非最大化时四周没边框、只有四个角有点青色」。
+   *
+   * 内缩 1px 后边框完整落在可见区内，视觉上与贴边几乎无差别。
+   */
+  inset: '1px',
   zIndex: 60,
   pointerEvents: 'none',
   border: `${BORDER_WIDTH_REM} solid var(--wj-window-border)`,
