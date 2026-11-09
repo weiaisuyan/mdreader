@@ -1,14 +1,14 @@
-# wj-markdown-editor 项目上下文
+# mdreader 项目上下文
 
 ## 构建、运行与测试命令
 
-### Web 前端（在 `wj-markdown-editor-web/` 目录执行）
+### Web 前端（在 `mdreader-web/` 目录执行）
 
 ```bash
 # 开发模式（端口 8080）
 npm run dev
 
-# 构建到 ../wj-markdown-editor-electron/web-dist
+# 构建到 ../mdreader-electron/web-dist
 npm run build
 
 # 预览构建结果
@@ -19,7 +19,7 @@ npm run test
 npm run test:run
 ```
 
-### Electron 桌面端（在 `wj-markdown-editor-electron/` 目录执行）
+### Electron 桌面端（在 `mdreader-electron/` 目录执行）
 
 ```bash
 # 开发模式（需先在 web 目录启动 `npm run dev`，Electron 会连接 http://localhost:8080）
@@ -44,8 +44,8 @@ npm run test:run
 
 ### 构建产物
 
-- Web 构建输出到 `wj-markdown-editor-electron/web-dist`
-- Electron 构建输出目录为 `wj-markdown-editor-electron/electron-build`
+- Web 构建输出到 `mdreader-electron/web-dist`
+- Electron 构建输出目录为 `mdreader-electron/electron-build`
 - Windows：`nsis` 安装包 + `zip`
 - Linux：`deb` + `rpm` + `AppImage`
 
@@ -58,8 +58,8 @@ npm run test:run
 补充要求：
 
 - 修改或新增文件后，必须在对应包目录下使用该包自己的 ESLint 配置进行格式化，不得跨包混用配置。
-- `wj-markdown-editor-web` 下的文件，需要在 `wj-markdown-editor-web/` 目录中按文件执行 ESLint 格式化；如果修改了多个文件，则一次传入多个文件路径一起格式化，例如：`npx eslint --fix <文件路径1> <文件路径2>`，不要执行全局格式化。
-- `wj-markdown-editor-electron` 下的文件，需要在 `wj-markdown-editor-electron/` 目录中按文件执行 ESLint 格式化；如果修改了多个文件，则一次传入多个文件路径一起格式化，例如：`npx eslint --fix <文件路径1> <文件路径2>`，不要执行全局格式化。
+- `mdreader-web` 下的文件，需要在 `mdreader-web/` 目录中按文件执行 ESLint 格式化；如果修改了多个文件，则一次传入多个文件路径一起格式化，例如：`npx eslint --fix <文件路径1> <文件路径2>`，不要执行全局格式化。
+- `mdreader-electron` 下的文件，需要在 `mdreader-electron/` 目录中按文件执行 ESLint 格式化；如果修改了多个文件，则一次传入多个文件路径一起格式化，例如：`npx eslint --fix <文件路径1> <文件路径2>`，不要执行全局格式化。
 
 ### 代码风格
 

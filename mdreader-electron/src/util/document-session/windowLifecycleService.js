@@ -3751,7 +3751,7 @@ async function createNew(filePath, isRecent = false, options = {}) {
     frame: true,
     titleBarStyle: 'hidden',
     icon: WINDOW_ICON_PATH,
-    title: 'wj-markdown-editor',
+    title: 'mdreader',
     // 先隐藏窗口，待首帧渲染完成（ready-to-show）后再显示，避免暗色主题下启动时暴露页面加载期间的白色帧
     show: false,
     // 圆角窗口：窗口本身必须透明，圆角由渲染层的 CSS 裁出来。

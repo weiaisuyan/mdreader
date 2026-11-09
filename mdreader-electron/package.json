@@ -8,9 +8,9 @@
     "email": "bxqyher@outlook.com"
   },
   "license": "MIT",
-  "homepage": "https://github.com/nlbwqmz/wj-markdown-editor",
+  "homepage": "https://github.com/weiaisuyan/mdreader",
   "main": "src/main.js",
-  "desktopName": "wj-markdown-editor",
+  "desktopName": "mdreader",
   "scripts": {
     "start": "cross-env WJ_WEB_SOURCE=dev WJ_USER_DATA_IN_APP_DIR=1 electron .",
     "static": "cross-env WJ_WEB_SOURCE=dist WJ_USER_DATA_IN_APP_DIR=1 electron .",

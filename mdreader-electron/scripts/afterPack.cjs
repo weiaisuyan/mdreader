@@ -14,8 +14,8 @@ module.exports = async function afterPack(context) {
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>wj-markdown-editor</id>
-  <name>wj-markdown-editor</name>
+  <id>mdreader</id>
+  <name>mdreader</name>
   <summary>An open-source desktop Markdown editor</summary>
   <summary xml:lang="zh-CN">开源桌面端 Markdown 编辑器</summary>
 
@@ -23,13 +23,13 @@ module.exports = async function afterPack(context) {
   <project_license>MIT</project_license>
 
   <description>
-    <p>wj-markdown-editor is an open-source desktop Markdown editor for Windows and Linux. It offers a live preview with precise synchronized scrolling, formula and diagram rendering (KaTeX / Mermaid), GitHub alerts and custom containers, image and attachment insertion, image hosting upload, dark mode and custom themes, export to PDF / PNG / JPEG, and full-text search.</p>
+    <p>mdreader is an open-source desktop Markdown editor for Windows and Linux. It offers a live preview with precise synchronized scrolling, formula and diagram rendering (KaTeX / Mermaid), GitHub alerts and custom containers, image and attachment insertion, image hosting upload, dark mode and custom themes, export to PDF / PNG / JPEG, and full-text search.</p>
   </description>
 
-  <launchable type="desktop-id">wj-markdown-editor.desktop</launchable>
+  <launchable type="desktop-id">mdreader.desktop</launchable>
 
-  <url type="homepage">https://github.com/nlbwqmz/wj-markdown-editor</url>
-  <url type="bugtracker">https://github.com/nlbwqmz/wj-markdown-editor/issues</url>
+  <url type="homepage">https://github.com/weiaisuyan/mdreader</url>
+  <url type="bugtracker">https://github.com/weiaisuyan/mdreader/issues</url>
 
   <screenshots>
     <screenshot type="default">
@@ -61,5 +61,5 @@ module.exports = async function afterPack(context) {
 
   const metainfoDir = path.join(context.appOutDir, 'usr', 'share', 'metainfo')
   fs.mkdirSync(metainfoDir, { recursive: true })
-  fs.writeFileSync(path.join(metainfoDir, 'wj-markdown-editor.appdata.xml'), xml, 'utf8')
+  fs.writeFileSync(path.join(metainfoDir, 'mdreader.appdata.xml'), xml, 'utf8')
 }

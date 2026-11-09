@@ -559,13 +559,13 @@ const handlerList = {
     return await executeConfigUpdate(async () => await configUtil.updateConfig(data, recent))
   },
   'app-info': () => {
-    return { name: 'wj-markdown-editor', version: app.getVersion() }
+    return { name: 'mdreader', version: app.getVersion() }
   },
   'get-default-config': () => {
     return configUtil.getDefaultConfig()
   },
   'get-app-info': () => {
-    return { name: 'wj-markdown-editor', version: app.getVersion() }
+    return { name: 'mdreader', version: app.getVersion() }
   },
   'check-update': async () => {
     return await updateUtil.checkUpdate(windowLifecycleService.listWindows())

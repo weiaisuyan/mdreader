@@ -99,7 +99,7 @@ export function deriveDocumentSnapshot(session) {
     recentMissingPath: recentMissing ? documentSource.missingPath : null,
     // 窗口标题使用的最终文案。
     // 未命名草稿统一显示应用名，其余情况显示文件名，保持桌面端标题行为稳定。
-    windowTitle: fileName === 'Untitled' ? 'wj-markdown-editor' : fileName,
+    windowTitle: fileName === 'Untitled' ? 'mdreader' : fileName,
     // 当前编辑内容是否已经与磁盘基线一致。
     // 只有正文内容一致，且“文件存在性”也一致时，才认为这份快照处于已保存状态。
     saved,

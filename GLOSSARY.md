@@ -1,4 +1,4 @@
-# wj-markdown-editor
+# mdreader
 
 桌面端 Markdown 编辑器。本上下文描述"编辑窗口里打开了哪些文档"这一组概念，以及它们之间的从属关系。
 

@@ -59,7 +59,7 @@ export default {
     pdf: {
       footer: {
         pageNumber: true,
-        content: '文档由<a target="_blank" href="https://github.com/nlbwqmz/wj-markdown-editor">wj-markdown-editor</a>导出',
+        content: '文档由<a target="_blank" href="https://github.com/weiaisuyan/mdreader">mdreader</a>导出',
       },
       header: {
         content: '',
@@ -83,7 +83,7 @@ export default {
     previewEnabled: true,
     dateEnabled: true,
     datePattern: 'YYYY-MM-DD',
-    content: 'wj-markdown-editor',
+    content: 'mdreader',
     rotate: -22,
     gap: [100, 100],
     font: {

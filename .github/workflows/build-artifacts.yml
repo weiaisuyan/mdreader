@@ -29,7 +29,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(node -p "require('./wj-markdown-editor-electron/package.json').version")"
+          version="$(node -p "require('./mdreader-electron/package.json').version")"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "release_notes_path=release-notes/${version}.md" >> "$GITHUB_OUTPUT"
 
@@ -106,34 +106,34 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            wj-markdown-editor-web/package-lock.json
-            wj-markdown-editor-electron/package-lock.json
+            mdreader-web/package-lock.json
+            mdreader-electron/package-lock.json
 
       - name: Install web dependencies
         run: npm ci
-        working-directory: wj-markdown-editor-web
+        working-directory: mdreader-web
 
       - name: Build web
         run: npm run build
-        working-directory: wj-markdown-editor-web
+        working-directory: mdreader-web
 
       - name: Install electron dependencies
         run: npm ci
-        working-directory: wj-markdown-editor-electron
+        working-directory: mdreader-electron
 
       - name: Build electron (Windows)
         run: npm run build -- --win --publish never
-        working-directory: wj-markdown-editor-electron
+        working-directory: mdreader-electron
 
       - name: Validate Windows artifacts
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $patterns = @(
-            'wj-markdown-editor-electron/electron-build/latest.yml',
-            'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.exe',
-            'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.exe.blockmap',
-            'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.zip'
+            'mdreader-electron/electron-build/latest.yml',
+            'mdreader-electron/electron-build/mdreader-win32-x64-*.exe',
+            'mdreader-electron/electron-build/mdreader-win32-x64-*.exe.blockmap',
+            'mdreader-electron/electron-build/mdreader-win32-x64-*.zip'
           )
 
           foreach ($pattern in $patterns) {
@@ -151,10 +151,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $files = @(
-            Get-ChildItem 'wj-markdown-editor-electron/electron-build/latest.yml' | Select-Object -ExpandProperty FullName
-            Get-ChildItem 'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.exe' | Select-Object -ExpandProperty FullName
-            Get-ChildItem 'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.exe.blockmap' | Select-Object -ExpandProperty FullName
-            Get-ChildItem 'wj-markdown-editor-electron/electron-build/wj-markdown-editor-win32-x64-*.zip' | Select-Object -ExpandProperty FullName
+            Get-ChildItem 'mdreader-electron/electron-build/latest.yml' | Select-Object -ExpandProperty FullName
+            Get-ChildItem 'mdreader-electron/electron-build/mdreader-win32-x64-*.exe' | Select-Object -ExpandProperty FullName
+            Get-ChildItem 'mdreader-electron/electron-build/mdreader-win32-x64-*.exe.blockmap' | Select-Object -ExpandProperty FullName
+            Get-ChildItem 'mdreader-electron/electron-build/mdreader-win32-x64-*.zip' | Select-Object -ExpandProperty FullName
           )
 
           gh release upload $env:RELEASE_TAG @files --clobber
@@ -174,20 +174,20 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            wj-markdown-editor-web/package-lock.json
-            wj-markdown-editor-electron/package-lock.json
+            mdreader-web/package-lock.json
+            mdreader-electron/package-lock.json
 
       - name: Install web dependencies
         run: npm ci
-        working-directory: wj-markdown-editor-web
+        working-directory: mdreader-web
 
       - name: Build web
         run: npm run build
-        working-directory: wj-markdown-editor-web
+        working-directory: mdreader-web
 
       - name: Install electron dependencies
         run: npm ci
-        working-directory: wj-markdown-editor-electron
+        working-directory: mdreader-electron
 
       - name: Install rpm tool
         run: |
@@ -203,14 +203,14 @@ jobs:
           mkdir -p "$TOOLSET_DIR"
           curl -sSL "https://github.com/electron-userland/electron-builder-binaries/releases/download/appimage%401.0.2/appimage-tools-runtime-20251108.tar.gz" \
             | tar -xz -C "$TOOLSET_DIR"
-          node wj-markdown-editor-electron/scripts/injectUpdateInfo.cjs \
+          node mdreader-electron/scripts/injectUpdateInfo.cjs \
             "$TOOLSET_DIR/runtimes/runtime-x64" \
-            "gh-releases-zsync|nlbwqmz|wj-markdown-editor|latest|wj-markdown-editor-*.AppImage.zsync"
+            "gh-releases-zsync|nlbwqmz|mdreader|latest|mdreader-*.AppImage.zsync"
           echo "APPIMAGE_TOOLS_PATH=$TOOLSET_DIR" >> "$GITHUB_ENV"
 
       - name: Build electron (Linux)
         run: npm run build -- --linux --publish never
-        working-directory: wj-markdown-editor-electron
+        working-directory: mdreader-electron
 
       - name: Validate Linux artifacts
         shell: bash
@@ -224,13 +224,13 @@ jobs:
             fi
           }
 
-          check_file "wj-markdown-editor-electron/electron-build/latest-linux.yml"
-          check_file "wj-markdown-editor-electron/electron-build/wj-markdown-editor-linux-amd64-*.deb"
-          check_file "wj-markdown-editor-electron/electron-build/wj-markdown-editor-linux-x86_64-*.rpm"
-          check_file "wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage"
+          check_file "mdreader-electron/electron-build/latest-linux.yml"
+          check_file "mdreader-electron/electron-build/mdreader-linux-amd64-*.deb"
+          check_file "mdreader-electron/electron-build/mdreader-linux-x86_64-*.rpm"
+          check_file "mdreader-electron/electron-build/mdreader-x86_64-*.AppImage"
 
           # 校验 AppImage 使用静态 runtime（不依赖 libfuse2），防止 toolsets 配置回退
-          APPIMAGE_FILE=$(compgen -G "wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage" | head -n 1)
+          APPIMAGE_FILE=$(compgen -G "mdreader-electron/electron-build/mdreader-x86_64-*.AppImage" | head -n 1)
           if readelf -lW "$APPIMAGE_FILE" | grep -q 'Requesting program interpreter'; then
             echo "AppImage runtime 为动态链接，与静态 runtime 预期不符"
             exit 1
@@ -238,7 +238,7 @@ jobs:
           echo "AppImage runtime 校验通过：静态链接"
 
           # 校验 AppImage 已嵌入 AppImageUpdate 的 update information
-          if ! "$APPIMAGE_FILE" --appimage-updateinformation | tr -d '\0' | grep -q "^gh-releases-zsync|nlbwqmz|wj-markdown-editor|"; then
+          if ! "$APPIMAGE_FILE" --appimage-updateinformation | tr -d '\0' | grep -q "^gh-releases-zsync|nlbwqmz|mdreader|"; then
             echo "AppImage update information 校验失败"
             exit 1
           fi
@@ -249,10 +249,10 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get install --no-install-recommends -y zsync
-          APPIMAGE_FILE=$(compgen -G "wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage" | head -n 1)
-          VERSION=$(node -p "require('./wj-markdown-editor-electron/package.json').version")
+          APPIMAGE_FILE=$(compgen -G "mdreader-electron/electron-build/mdreader-x86_64-*.AppImage" | head -n 1)
+          VERSION=$(node -p "require('./mdreader-electron/package.json').version")
           zsyncmake \
-            -u "https://github.com/nlbwqmz/wj-markdown-editor/releases/download/${VERSION}/$(basename "$APPIMAGE_FILE")" \
+            -u "https://github.com/weiaisuyan/mdreader/releases/download/${VERSION}/$(basename "$APPIMAGE_FILE")" \
             -o "${APPIMAGE_FILE}.zsync" \
             "$APPIMAGE_FILE"
           ls -lh "${APPIMAGE_FILE}.zsync"
@@ -266,9 +266,9 @@ jobs:
           set -euo pipefail
 
           gh release upload "$RELEASE_TAG" \
-            wj-markdown-editor-electron/electron-build/latest-linux.yml \
-            wj-markdown-editor-electron/electron-build/wj-markdown-editor-linux-amd64-*.deb \
-            wj-markdown-editor-electron/electron-build/wj-markdown-editor-linux-x86_64-*.rpm \
-            wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage \
-            wj-markdown-editor-electron/electron-build/wj-markdown-editor-x86_64-*.AppImage.zsync \
+            mdreader-electron/electron-build/latest-linux.yml \
+            mdreader-electron/electron-build/mdreader-linux-amd64-*.deb \
+            mdreader-electron/electron-build/mdreader-linux-x86_64-*.rpm \
+            mdreader-electron/electron-build/mdreader-x86_64-*.AppImage \
+            mdreader-electron/electron-build/mdreader-x86_64-*.AppImage.zsync \
             --clobber
