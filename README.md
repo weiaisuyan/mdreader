@@ -1,4 +1,4 @@
-# wj-markdown-editor
+# mdreader
 
 <div align="center">
 
@@ -8,15 +8,19 @@
 
 [中文](./README.md) | [English](./README.en.md)
 
-[![release](https://img.shields.io/github/v/release/nlbwqmz/wj-markdown-editor?label=release)](https://github.com/nlbwqmz/wj-markdown-editor/releases)
+[![release](https://img.shields.io/github/v/release/weiaisuyan/mdreader?label=release)](https://github.com/weiaisuyan/mdreader/releases)
 [![license](https://img.shields.io/badge/license-MIT-1677ff.svg)](./LICENSE)
-[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-2ea44f.svg)](https://github.com/nlbwqmz/wj-markdown-editor/releases)
+[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-2ea44f.svg)](https://github.com/weiaisuyan/mdreader/releases)
 
-[下载地址](https://github.com/nlbwqmz/wj-markdown-editor/releases) · [问题反馈](https://github.com/nlbwqmz/wj-markdown-editor/issues) · [源码仓库](https://github.com/nlbwqmz/wj-markdown-editor)
+[下载地址](https://github.com/weiaisuyan/mdreader/releases) · [问题反馈](https://github.com/weiaisuyan/mdreader/issues) · [源码仓库](https://github.com/weiaisuyan/mdreader)
 
 </div>
 
-> `wj-markdown-editor` 聚焦桌面写作场景，覆盖编辑、预览、搜索、资源管理、导出、主题定制与多标签 / 多窗口文档会话的完整工作流。
+> `mdreader` 聚焦桌面写作场景，覆盖编辑、预览、搜索、资源管理、导出、主题定制与多标签 / 多窗口文档会话的完整工作流。
+
+> **关于本项目**：`mdreader` 是基于 [nlbwqmz/wj-markdown-editor](https://github.com/nlbwqmz/wj-markdown-editor)
+> （MIT 协议）的自维护分支，在原项目基础上做了品牌更名、窗口动画修复、分栏与标签交互改进等工作。
+> 原项目版权与许可声明完整保留于 [LICENSE](./LICENSE)。
 
 ## ✨ 功能速览
 
@@ -135,33 +139,27 @@
 - 支持中英文界面切换（`zh-CN` / `en-US`）
 - 内置使用指南、关于页、设置页与导出页等桌面窗口
 
-## 📸 界面截图
-
-![编辑界面](https://cdn.jsdelivr.net/gh/nlbwqmz/static-resource@main/image/edit.png)
-
-![预览界面](https://cdn.jsdelivr.net/gh/nlbwqmz/static-resource@main/image/preview.png)
-
 ## ⚡ 快速开始
 
 ### 下载安装
 
-1. 进入 [Releases](https://github.com/nlbwqmz/wj-markdown-editor/releases) 下载对应系统安装包
+1. 进入 [Releases](https://github.com/weiaisuyan/mdreader/releases) 下载对应系统安装包
 2. 安装版支持自动升级；便携版（ZIP）需手动替换程序文件
 
 ### 开发运行
 
 ```bash
 # 1) 克隆项目
-git clone https://github.com/nlbwqmz/wj-markdown-editor.git
-cd wj-markdown-editor
+git clone https://github.com/weiaisuyan/mdreader.git
+cd mdreader
 
 # 2) 启动前端开发服务
-cd wj-markdown-editor-web
+cd mdreader-web
 npm install
 npm run dev
 
 # 3) 启动 Electron
-cd ../wj-markdown-editor-electron
+cd ../mdreader-electron
 npm install
 npm run start
 ```
@@ -170,11 +168,11 @@ npm run start
 
 ```bash
 # Web
-cd wj-markdown-editor-web
+cd mdreader-web
 npm run test
 
 # Electron
-cd ../wj-markdown-editor-electron
+cd ../mdreader-electron
 npm run test
 ```
 
@@ -182,7 +180,7 @@ npm run test
 
 ```bash
 # 仅构建 Electron 安装包
-cd wj-markdown-editor-electron
+cd mdreader-electron
 npm run build
 
 # 完整构建（Web + Electron）
@@ -194,11 +192,11 @@ npm run make
 - Windows: `NSIS` 安装包 + `ZIP` 便携版
 - Linux: `DEB` + `RPM` + `AppImage`
 
-AppImage 运行说明（`wj-markdown-editor-x86_64-<version>.AppImage`）：
+AppImage 运行说明（`mdreader-x86_64-<version>.AppImage`）：
 
-- 免安装的单文件可执行程序，需先赋予可执行权限：`chmod +x wj-markdown-editor-x86_64-*.AppImage`，之后直接运行即可
+- 免安装的单文件可执行程序，需先赋予可执行权限：`chmod +x mdreader-x86_64-*.AppImage`，之后直接运行即可
 - 不会自动集成桌面项，因此不会写入应用菜单或安装图标；如需集成可配合 [Gear Lever](https://gearlever.mijorus.it)（可从 Flathub 安装，支持一键集成到应用菜单、拖放添加与更新管理）或 AppImageLauncher 之类的工具
-- 也可通过 [AM](https://github.com/ivan-hc/AM)（AppImage Manager）安装与管理：用户级使用 `appman -i wj-markdown-editor`，系统级使用 `am -i wj-markdown-editor`；支持一键安装、应用菜单集成与自动更新（由 AM 社区维护的收录脚本，动态解析本仓库 Release）
+- 也可通过 [AM](https://github.com/ivan-hc/AM)（AppImage Manager）安装与管理：用户级使用 `appman -i mdreader`，系统级使用 `am -i mdreader`；支持一键安装、应用菜单集成与自动更新（由 AM 社区维护的收录脚本，动态解析本仓库 Release）
 - 内置静态 runtime（2.21.1 之后的版本起），不再依赖系统的 `libfuse2`；2.21.1 及更早版本使用动态 runtime，在部分发行版（如 Ubuntu 24.04+）需安装 `libfuse2t64`，较旧发行版需安装 `libfuse2`，缺失时会提示 `AppImages require FUSE to run` / `dlopen(): error loading libfuse.so.2`，也可改用 `--appimage-extract-and-run` 参数运行
 - 内置更新信息（2.22.0 之后的版本起），可通过 [AppImageUpdate](https://github.com/AppImage/AppImageUpdate) 或 `appimageupdatetool` 做增量更新（仅下载变化的数据块）
 

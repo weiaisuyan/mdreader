@@ -1,4 +1,4 @@
-# wj-markdown-editor
+# mdreader
 
 <div align="center">
 
@@ -8,15 +8,20 @@ A Markdown writing, preview, export, and asset management tool for Windows and L
 
 [中文](./README.md) | [English](./README.en.md)
 
-[![release](https://img.shields.io/github/v/release/nlbwqmz/wj-markdown-editor?label=release)](https://github.com/nlbwqmz/wj-markdown-editor/releases)
+[![release](https://img.shields.io/github/v/release/weiaisuyan/mdreader?label=release)](https://github.com/weiaisuyan/mdreader/releases)
 [![license](https://img.shields.io/badge/license-MIT-1677ff.svg)](./LICENSE)
-[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-2ea44f.svg)](https://github.com/nlbwqmz/wj-markdown-editor/releases)
+[![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-2ea44f.svg)](https://github.com/weiaisuyan/mdreader/releases)
 
-[Download](https://github.com/nlbwqmz/wj-markdown-editor/releases) · [Issues](https://github.com/nlbwqmz/wj-markdown-editor/issues) · [Repository](https://github.com/nlbwqmz/wj-markdown-editor)
+[Download](https://github.com/weiaisuyan/mdreader/releases) · [Issues](https://github.com/weiaisuyan/mdreader/issues) · [Repository](https://github.com/weiaisuyan/mdreader)
 
 </div>
 
-> `wj-markdown-editor` focuses on desktop writing workflows, covering editing, previewing, searching, asset management, exporting, theming, and multi-tab / multi-window document sessions.
+> `mdreader` focuses on desktop writing workflows, covering editing, previewing, searching, asset management, exporting, theming, and multi-tab / multi-window document sessions.
+
+> **About this project**: `mdreader` is a self-maintained fork of
+> [nlbwqmz/wj-markdown-editor](https://github.com/nlbwqmz/wj-markdown-editor) (MIT License).
+> Changes include rebranding, window animation fixes, and improvements to pane/tab interactions.
+> The original copyright and license notice are preserved in [LICENSE](./LICENSE).
 
 ## ✨ Feature Snapshot
 
@@ -135,33 +140,27 @@ A Markdown writing, preview, export, and asset management tool for Windows and L
 - Bilingual interface (`zh-CN` / `en-US`)
 - Built-in guide, about page, settings page, and export page windows
 
-## 📸 Screenshots
-
-![Editor](https://cdn.jsdelivr.net/gh/nlbwqmz/static-resource@main/image/edit.png)
-
-![Preview](https://cdn.jsdelivr.net/gh/nlbwqmz/static-resource@main/image/preview.png)
-
 ## ⚡ Quick Start
 
 ### Download and Install
 
-1. Go to [Releases](https://github.com/nlbwqmz/wj-markdown-editor/releases) and download the package for your platform.
+1. Go to [Releases](https://github.com/weiaisuyan/mdreader/releases) and download the package for your platform.
 2. Installer builds support auto-update. Portable ZIP builds need manual replacement.
 
 ### Development
 
 ```bash
 # 1) Clone the project
-git clone https://github.com/nlbwqmz/wj-markdown-editor.git
-cd wj-markdown-editor
+git clone https://github.com/weiaisuyan/mdreader.git
+cd mdreader
 
 # 2) Start the web dev server
-cd wj-markdown-editor-web
+cd mdreader-web
 npm install
 npm run dev
 
 # 3) Start Electron
-cd ../wj-markdown-editor-electron
+cd ../mdreader-electron
 npm install
 npm run start
 ```
@@ -170,11 +169,11 @@ npm run start
 
 ```bash
 # Web
-cd wj-markdown-editor-web
+cd mdreader-web
 npm run test
 
 # Electron
-cd ../wj-markdown-editor-electron
+cd ../mdreader-electron
 npm run test
 ```
 
@@ -182,7 +181,7 @@ npm run test
 
 ```bash
 # Build Electron packages only
-cd wj-markdown-editor-electron
+cd mdreader-electron
 npm run build
 
 # Full build (Web + Electron)
@@ -194,11 +193,11 @@ Build artifacts:
 - Windows: `NSIS` installer + `ZIP` portable package
 - Linux: `DEB` + `RPM` + `AppImage`
 
-Running the AppImage (`wj-markdown-editor-x86_64-<version>.AppImage`):
+Running the AppImage (`mdreader-x86_64-<version>.AppImage`):
 
-- It is a portable single-file executable, so grant the execute permission first with `chmod +x wj-markdown-editor-x86_64-*.AppImage` and then run it directly
+- It is a portable single-file executable, so grant the execute permission first with `chmod +x mdreader-x86_64-*.AppImage` and then run it directly
 - Desktop integration is not applied automatically, so no application menu entry or icon is installed; use [Gear Lever](https://gearlever.mijorus.it) (available on Flathub; supports one-click integration into the application menu, drag and drop, and update management) or a tool such as AppImageLauncher if you want integration
-- Alternatively, install and manage it via [AM](https://github.com/ivan-hc/AM) (AppImage Manager): use `appman -i wj-markdown-editor` for user-level or `am -i wj-markdown-editor` for system-level installation, with one-command install, desktop menu integration and automatic updates (community-maintained AM script that dynamically tracks this repository's releases).
+- Alternatively, install and manage it via [AM](https://github.com/ivan-hc/AM) (AppImage Manager): use `appman -i mdreader` for user-level or `am -i mdreader` for system-level installation, with one-command install, desktop menu integration and automatic updates (community-maintained AM script that dynamically tracks this repository's releases).
 - Ships a static runtime (from versions after 2.21.1), so the system `libfuse2` is no longer required; 2.21.1 and earlier use a dynamic runtime and need `libfuse2t64` on some distributions (e.g. Ubuntu 24.04+) or `libfuse2` on older releases, otherwise you may see `AppImages require FUSE to run` / `dlopen(): error loading libfuse.so.2`, and you can also run with `--appimage-extract-and-run` instead
 - Embeds update information (from versions after 2.22.0), so [AppImageUpdate](https://github.com/AppImage/AppImageUpdate) or `appimageupdatetool` can perform delta updates (only the changed blocks are downloaded)
 
