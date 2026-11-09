@@ -31,8 +31,10 @@ import { message } from 'ant-design-vue'
 import { useI18n } from 'vue-i18n'
 import {
   FILE_PATH_MIME,
+  isPaneReusableBlank,
   openDroppedFileInGroup,
   openDroppedFileInSplitPane,
+  openDroppedFileReplacingBlank,
   resolveDroppedFilePath,
   resolveOpenFailureMessageKey,
 } from '@/util/file-manager/fileDragDropUtil.js'
@@ -240,6 +242,15 @@ function updateDropHover(clientX, clientY, { ignoreTabHit = false } = {}) {
     if (intent.kind === DROP_KIND_TAB) {
       return false
     }
+    /**
+     * 目标栏只有一个空白标签时，松手走的是「就在这一栏打开、顶替空标签」，
+     * 根本不会分栏。预览必须跟执行一致：这里不画半屏，否则用户看到要分栏、
+     * 松手却没分，又是一次「预览骗人」。
+     */
+    const blankTargetPane = (store.paneGroupList || []).find(item => item.groupId === intent.paneId)
+    if (isPaneReusableBlank(blankTargetPane)) {
+      return false
+    }
     // 正在拖标签时，还有两条额外规则
     if (editorPaneDropState.dragging) {
       /**
@@ -418,6 +429,22 @@ async function handleFileDrop(event) {
 
   // 分栏意图（外侧 20% 边缘带）：把文件开进**目标栏那一侧**的新栏。
   // 其它情况都在目标栏里加一个标签。
+  /**
+   * 目标栏只有一个空白标签时，拖入一律视为「在这一栏打开」，不分栏。
+   *
+   * 这个判断必须在 split 分支**之前**且不看 intent：用户把文件拖到一个新建的空标签上，
+   * 无论落点在中间还是边缘，意图都是「打开它」，而不是「劈成两栏、左边留个空标签」。
+   */
+  const splitTargetPane = paneList.find(item => item?.groupId === hit.paneId) || null
+  if (isPaneReusableBlank(splitTargetPane)) {
+    const blankResult = await openDroppedFileReplacingBlank(path, splitTargetPane, store)
+    const blankFailureKey = resolveOpenFailureMessageKey(blankResult?.reason)
+    if (blankFailureKey) {
+      message.error(t(blankFailureKey))
+    }
+    return
+  }
+
   if (intent.kind === 'split' && paneList.length < MAX_PANE_COUNT) {
     const splitResult = await openDroppedFileInSplitPane(path, store, {
       targetGroupId: hit.paneId,
@@ -746,6 +773,22 @@ async function handleWindowDrop(event) {
    */
   event.preventDefault()
   event.stopPropagation()
+
+  /**
+   * 目标栏只有一个空白标签时，拖入一律视为「在这一栏打开」，不分栏。
+   *
+   * 这个判断必须在 split 分支**之前**且不看 intent：用户把文件拖到一个新建的空标签上，
+   * 无论落点在中间还是边缘，意图都是「打开它」，而不是「劈成两栏、左边留个空标签」。
+   */
+  const splitTargetPane = paneList.find(item => item?.groupId === hit.paneId) || null
+  if (isPaneReusableBlank(splitTargetPane)) {
+    const blankResult = await openDroppedFileReplacingBlank(path, splitTargetPane, store)
+    const blankFailureKey = resolveOpenFailureMessageKey(blankResult?.reason)
+    if (blankFailureKey) {
+      message.error(t(blankFailureKey))
+    }
+    return
+  }
 
   if (intent.kind === 'split' && paneList.length < MAX_PANE_COUNT) {
     const splitResult = await openDroppedFileInSplitPane(path, store, {

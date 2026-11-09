@@ -11,8 +11,10 @@ import { requestDocumentActivateGroup } from '@/util/document-session/rendererDo
 import { createTabInCurrentWindow } from '@/util/document-session/rendererTabCommandService.js'
 import {
   FILE_PATH_MIME,
+  isPaneReusableBlank,
   openDroppedFileInGroup,
   openDroppedFileInSplitPane,
+  openDroppedFileReplacingBlank,
   resolveDroppedFilePath,
   resolveOpenFailureMessageKey,
 } from '@/util/file-manager/fileDragDropUtil.js'
@@ -348,6 +350,21 @@ async function handlePaneDrop(pane, event) {
   }
   event.preventDefault()
   fileDragOverGroupId.value = null
+
+  /**
+   * 这一栏只有一个空白标签时，任何位置的拖入都视为「就在这儿打开」，不分栏。
+   *
+   * 否则用户把文件拖到一个什么都没写的新建标签上，会得到「左边凭空多出一个空白标签、
+   * 右边才是文件」的结果 —— 那个空白标签纯属噪音。
+   */
+  if (isPaneReusableBlank(pane)) {
+    const blankResult = await openDroppedFileReplacingBlank(path, pane, store)
+    const blankFailureKey = resolveOpenFailureMessageKey(blankResult?.reason)
+    if (blankFailureKey) {
+      message.error(t(blankFailureKey))
+    }
+    return
+  }
 
   // 单栏时拖到这一栏标签条的**右半**（含最右侧那块空白）= 想分栏，
   // 而不是在原来这一栏里再加一个标签。

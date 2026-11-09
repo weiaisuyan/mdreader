@@ -7,6 +7,7 @@ import configUtil from '../../data/configUtil.js'
 import recent from '../../data/recent.js'
 import tabGroup from '../../data/tabGroup.js'
 import { WINDOW_ICON_PATH } from '../appIconUtil.js'
+import { ensureWindowCaptionStyle } from '../windowStyleUtil.js'
 import sendUtil from '../channel/sendUtil.js'
 import commonUtil from '../commonUtil.js'
 import fileWatchUtil from '../fileWatchUtil.js'
@@ -3750,6 +3751,17 @@ async function createNew(filePath, isRecent = false, options = {}) {
      */
     frame: true,
     titleBarStyle: 'hidden',
+    /**
+     * 关掉 `WS_THICKFRAME`：`frame: true` 会把系统的可调边框带回来，实测内容区比
+     * 窗口外框小 14×8px（左右各 7px、上下各 4px），渲染层画在内容区里的青色边框
+     * 就贴不到窗口上沿（表现为「只有最大化时上边框才看得见」）。
+     *
+     * 但 Electron 关掉 thickFrame 时会把 `WS_CAPTION` 一起去掉（窗口退化成 WS_POPUP），
+     * 系统动画随之消失。所以下面创建完窗口再手工把 CAPTION 补回去 —— 只加 CAPTION、
+     * 不加 THICKFRAME，两条要求同时满足。
+     */
+    thickFrame: false,
+
     icon: WINDOW_ICON_PATH,
     title: 'mdreader',
     // 先隐藏窗口，待首帧渲染完成（ready-to-show）后再显示，避免暗色主题下启动时暴露页面加载期间的白色帧
@@ -3777,6 +3789,16 @@ async function createNew(filePath, isRecent = false, options = {}) {
       additionalArguments: [`--wj-initial-theme=${globalTheme}`],
     },
   })
+
+  /**
+   * 补回 `WS_CAPTION`（见 thickFrame 处的说明）。
+   *
+   * 必须在这一刻做：HWND 已经建好、窗口还没显示（show: false），
+   * 此时改样式位不会让用户看到窗口跳一下。失败也只是降级（动画缺失），
+   * 不会影响窗口本身。
+   */
+  ensureWindowCaptionStyle(win)
+
   let session = null
 
   try {

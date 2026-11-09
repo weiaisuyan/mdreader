@@ -39,7 +39,16 @@ const isRounded = computed(() => store.isMaximize !== true && store.isFullScreen
  * ⚠️ 必须写**显式 px**：内联样式不过 postcss-pxtorem，数值永远等于这里写的值；
  * 用 `border-radius: inherit` 会受根字号影响而漂移。
  */
-const CORNER_RADIUS_PX = 0
+/*
+ * 窗口圆角半径。
+ *
+ * 窗口不透明（`transparent: false`），圆角由 DWM 通过 `roundedCorners: true` 画，
+ * Win11 的半径就是 8px。CSS 这里必须用同一个值：
+ *   · 写 0   → 边框 div 变成直角，四角被系统那圈圆角裁掉，上边框和圆角一起消失；
+ *   · 写 16  → 系统在 8px 处已裁一圈，CSS 又在 16px 处裁一次，两圈弧之间露出深色环。
+ * 只有 8px 能让边框完全落在系统圆角之内，四条边都完整可见。
+ */
+const CORNER_RADIUS_PX = 8
 
 /**
  * 窗口边框宽度。

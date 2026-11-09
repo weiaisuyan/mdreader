@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import channelUtil from '@/util/channel/channelUtil.js'
-import { requestDocumentActivateTab, requestDocumentCreateGroup, requestDocumentMoveTabToGroup, requestDocumentOpenPathInCurrentWindow } from '@/util/document-session/rendererDocumentCommandUtil.js'
+import { requestDocumentActivateTab, requestDocumentCloseTab, requestDocumentCreateGroup, requestDocumentMoveTabToGroup, requestDocumentOpenPathInCurrentWindow } from '@/util/document-session/rendererDocumentCommandUtil.js'
 import { requestDocumentOpenPathByInteraction } from '@/util/document-session/documentOpenInteractionService.js'
 import { MIN_PANE_WIDTH, PANE_GUTTER_WIDTH, halvePaneWidths } from '@/util/document-session/paneLayoutUtil.js'
 import { createSetConfigPathRequest, sendConfigMutationRequest } from '@/util/config/configMutationCommandUtil.js'
@@ -231,6 +231,55 @@ export function resolveDroppedFilePath(event) {
  * @param {string | null} groupId 目标栏
  * @returns {Promise<object>} 打开结果
  */
+/**
+ * 这一栏是不是「只剩一个空白标签」—— 也就是一个新建后什么都没做的文档。
+ *
+ * 这种栏不该被当成「有内容的目标栏」去分栏：用户从文件列表往一个空白标签上拖文件，
+ * 意图显然是「就在这儿打开」，而不是「把它劈成两栏，左边留个空白标签」。
+ *
+ * 三条同时成立才算空白：
+ * 1. 这一栏只有一个标签；
+ * 2. 该标签没有关联任何文件路径（新建未保存）；
+ * 3. 没有未保存的修改 —— 用户只要打过字，就不能被拖进来的文件顶掉。
+ *
+ * @param {object | null | undefined} pane 栏快照（含 tabs 数组）
+ * @returns {boolean} 是否可以由拖入的文件直接顶替
+ */
+export function isPaneReusableBlank(pane) {
+  const tabs = Array.isArray(pane?.tabs) ? pane.tabs : []
+  if (tabs.length !== 1) {
+    return false
+  }
+  const tab = tabs[0]
+  if (!tab) {
+    return false
+  }
+  if (tab.displayPath) {
+    return false
+  }
+  return tab.dirty !== true
+}
+
+/**
+ * 把拖入的文件开进某一栏，并顶替掉那一栏的空标签。
+ *
+ * 先 open 再关空标签：打开失败时空白标签必须还在，不能先删后开（那样一旦打开失败，
+ * 用户连那个空白标签都没了）。
+ *
+ * @param {string} path 文件绝对路径
+ * @param {object} pane 目标栏快照
+ * @param {object} store 渲染层 store
+ * @returns {Promise<object>} 打开结果
+ */
+export async function openDroppedFileReplacingBlank(path, pane, store = null) {
+  const blankSessionId = pane?.tabs?.[0]?.sessionId ?? null
+  const result = await openDroppedFileInGroup(path, pane?.groupId, store)
+  if (result?.ok === true && blankSessionId) {
+    await requestDocumentCloseTab(blankSessionId).catch(() => {})
+  }
+  return result
+}
+
 export async function openDroppedFileInGroup(path, groupId, store = null) {
   if (!path) {
     return { ok: false, reason: 'empty-path' }
