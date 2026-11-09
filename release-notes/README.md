@@ -4,9 +4,14 @@
 
 ## 命名规则
 
-- 文件名必须与 `wj-markdown-editor-electron/package.json` 中的 `version` 完全一致
+- 文件名必须与 `mdreader-electron/package.json` 中的 `version` 完全一致
 - 文件扩展名统一使用 `.md`
-- 示例：当前版本为 `2.15.0`，则说明文件应为 `release-notes/2.15.0.md`
+- 示例：当前版本为 `1.0.0`，则说明文件应为 `release-notes/1.0.0.md`
+
+## 目录结构
+
+- `release-notes/*.md` —— 本项目（mdreader）各版本的发布说明，版本号从 `1.0.0` 起算
+- `release-notes/upstream/` —— 上游项目 wj-markdown-editor 的 2.15.1 → 3.1.1 发布说明，**仅作历史存档**，不参与本项目的发布流程
 
 ## 使用方式
 
@@ -20,7 +25,7 @@
 
 1. 修改 Electron 包版本号
 2. 新增或更新对应版本的说明文件
-3. 创建与版本号完全一致的 tag，例如 `2.15.0`
+3. 创建与版本号完全一致的 tag，例如 `1.0.0`
 4. 推送该 tag 到远程仓库，workflow 会自动触发发布
 
 ## 注意事项

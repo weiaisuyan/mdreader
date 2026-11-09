@@ -2048,10 +2048,22 @@ defineExpose({
   max-width: 100%;
 }
 
+/*
+ * 空状态插图。
+ *
+ * 原写法只给 `svg { height: auto }`，结果 SVG 按自身比例撑到 152px，
+ * 而 `.ant-empty-image` 容器高度仍是 antd 给的 88px —— 插图溢出容器 64px，
+ * 「文档内容为空」和「去编辑」按钮直接被压在图标上，文字和按钮都看不清。
+ *
+ * 修法反过来：容器高度交给内容决定，SVG 撑满容器宽度、高度跟着比例走。
+ * 窄栏时 `max-width: 100%` 让整块按比例缩小，也不会顶破预览区。
+ */
 .markdown-edit-layout__preview :deep(.ant-empty-image) {
   max-width: 100%;
+  height: auto;
 
   svg {
+    display: block;
     max-width: 100%;
     height: auto;
   }
