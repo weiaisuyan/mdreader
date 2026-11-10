@@ -109,6 +109,7 @@ const settingTabList = computed(() => [
   { key: 'shortcut', label: t('config.title.shortcut'), icon: 'i-tabler:keyboard' },
   { key: 'fileAndImage', label: t('config.title.fileAndImage'), icon: 'i-tabler:folder' },
   { key: 'exportAndWatermark', label: t('config.title.exportAndWatermark'), icon: 'i-tabler:download' },
+  { key: 'configBackup', label: t('config.title.configBackup'), icon: 'i-tabler:archive' },
 ])
 
 // 每次打开设置页都回到常规，不做上次 tab 记忆。
@@ -591,6 +592,66 @@ function reset() {
       return true
     },
   })
+}
+
+/**
+ * 配置备份只包含应用设置本身，不含最近文件、标签页记录或任何笔记内容。
+ * 选文件与读写盘都在主进程完成，这里只负责触发与结果提示。
+ */
+const configBackupExporting = ref(false)
+const configBackupImporting = ref(false)
+
+async function exportConfigBackup() {
+  if (configBackupExporting.value) {
+    return
+  }
+
+  configBackupExporting.value = true
+  try {
+    const result = await channelUtil.send({ event: 'config-backup-export' })
+    if (result?.status === 'exported') {
+      message.success(t('message.configBackupExported'))
+    } else if (result?.status === 'failed') {
+      message.error(t('message.configBackupExportFailed'))
+    }
+  } finally {
+    configBackupExporting.value = false
+  }
+}
+
+function importConfigBackup() {
+  Modal.confirm({
+    title: t('config.configBackup.importConfirmTitle'),
+    icon: createVNode(ExclamationCircleOutlined),
+    content: t('config.configBackup.importConfirmContent'),
+    okText: t('okText'),
+    cancelText: t('cancelText'),
+    centered: true,
+    onOk: async () => {
+      await submitImportConfigBackup()
+      return true
+    },
+  })
+}
+
+async function submitImportConfigBackup() {
+  if (configBackupImporting.value) {
+    return
+  }
+
+  configBackupImporting.value = true
+  try {
+    const result = await channelUtil.send({ event: 'config-backup-import' })
+    if (result?.status === 'imported') {
+      message.success(t('message.configBackupImported'))
+    } else if (result?.status === 'invalid') {
+      message.error(t('message.configBackupInvalid'))
+    } else if (result?.status === 'failed') {
+      message.error(t('message.configBackupImportFailed'))
+    }
+  } finally {
+    configBackupImporting.value = false
+  }
 }
 </script>
 
@@ -1374,6 +1435,33 @@ function reset() {
             </a-descriptions-item>
             <a-descriptions-item v-if="config.watermark.enabled && isSettingItemVisible('watermark.fontColor')" :label="settingLabel('watermark.fontColor')">
               <ColorPicker :pure-color="config.watermark.font.color" format="rgb" shape="square" picker-type="chrome" @update:pure-color="value => submitSetPathMutation(['watermark', 'font', 'color'], value)" />
+            </a-descriptions-item>
+          </a-descriptions>
+        </section>
+        <section v-show="isSettingPanelVisible('configBackup')" data-panel-key="configBackup" class="setting-panel">
+          <a-descriptions v-show="isSettingSectionVisible('configBackup')" bordered :column="1" size="small" class="setting-descriptions" data-setting-section="configBackup">
+            <template #title>
+              <span id="configBackup">{{ $t('config.title.configBackup') }}</span>
+            </template>
+            <a-descriptions-item v-if="isSettingItemVisible('configBackup.export')" :label="settingLabel('configBackup.export')">
+              <div class="flex flex-col gap-2">
+                <div>
+                  <a-button :loading="configBackupExporting" @click="exportConfigBackup">
+                    {{ $t('config.configBackup.exportAction') }}
+                  </a-button>
+                </div>
+                <span class="text-xs leading-relaxed op-60">{{ $t('config.configBackup.exportTip') }}</span>
+              </div>
+            </a-descriptions-item>
+            <a-descriptions-item v-if="isSettingItemVisible('configBackup.import')" :label="settingLabel('configBackup.import')">
+              <div class="flex flex-col gap-2">
+                <div>
+                  <a-button danger :loading="configBackupImporting" @click="importConfigBackup">
+                    {{ $t('config.configBackup.importAction') }}
+                  </a-button>
+                </div>
+                <span class="text-xs leading-relaxed op-60">{{ $t('config.configBackup.importTip') }}</span>
+              </div>
             </a-descriptions-item>
           </a-descriptions>
         </section>

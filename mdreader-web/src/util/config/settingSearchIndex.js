@@ -17,6 +17,7 @@ const SETTING_SECTION_META = {
   imageBed: { titleKey: 'config.title.pictureBed', tabKey: 'fileAndImage' },
   export: { titleKey: 'config.title.export', tabKey: 'exportAndWatermark' },
   watermark: { titleKey: 'config.title.watermark', tabKey: 'exportAndWatermark' },
+  configBackup: { titleKey: 'config.title.configBackup', tabKey: 'configBackup' },
 }
 
 // tab 展示顺序，用于搜索结果稳定排序。
@@ -27,6 +28,7 @@ const SETTING_TAB_ORDER = {
   shortcut: 3,
   fileAndImage: 4,
   exportAndWatermark: 5,
+  configBackup: 6,
 }
 
 /**
@@ -116,6 +118,10 @@ const SETTING_SEARCH_ITEM_LIST = [
   { id: 'watermark.fontSize', sectionId: 'watermark', labelKey: 'config.watermark.fontSize', keywords: ['font', '字体', '字号'], optional: true },
   { id: 'watermark.fontWeight', sectionId: 'watermark', labelKey: 'config.watermark.fontWeight', keywords: ['font', '字体', '粗细'], optional: true },
   { id: 'watermark.fontColor', sectionId: 'watermark', labelKey: 'config.watermark.fontColor', keywords: ['font', '字体', '颜色', 'color'], optional: true },
+
+  // 配置备份
+  { id: 'configBackup.export', sectionId: 'configBackup', labelKey: 'config.configBackup.export', keywords: ['backup', 'export', '导出', '备份', '配置文件', 'config'] },
+  { id: 'configBackup.import', sectionId: 'configBackup', labelKey: 'config.configBackup.import', keywords: ['backup', 'import', '导入', '恢复', '迁移', 'config'] },
 ]
 
 /**

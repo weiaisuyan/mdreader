@@ -76,6 +76,8 @@ const OPERATION_TYPE_SET = new Set([
   'setShortcutKeyField',
   'setAutoSaveOption',
   'reset',
+  // 整包替换：仅供「导入配置备份」使用，不做逐字段白名单校验。
+  'replace',
 ])
 
 const SHORTCUT_KEY_FIELD_SET = new Set(['keymap', 'enabled'])
@@ -123,6 +125,14 @@ function validateAutoSaveOperation(operation) {
   }
 }
 
+function validateReplaceOperation(operation) {
+  const nextConfig = operation.config
+
+  if (!nextConfig || typeof nextConfig !== 'object' || Array.isArray(nextConfig)) {
+    throw new TypeError('replace 操作必须提供完整配置对象')
+  }
+}
+
 export function validateConfigMutationRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request)) {
     throw new TypeError('配置更新请求必须是对象')
@@ -138,6 +148,12 @@ export function validateConfigMutationRequest(request) {
     throw new TypeError('reset 操作必须单独提交')
   }
 
+  const replaceCount = request.operations.filter(operation => operation?.type === 'replace').length
+
+  if (replaceCount > 0 && request.operations.length > 1) {
+    throw new TypeError('replace 操作必须单独提交')
+  }
+
   for (const operation of request.operations) {
     if (!operation || typeof operation !== 'object' || Array.isArray(operation)) {
       throw new TypeError('配置更新操作必须是对象')
@@ -145,6 +161,11 @@ export function validateConfigMutationRequest(request) {
 
     if (!OPERATION_TYPE_SET.has(operation.type)) {
       throw new TypeError(`未知配置更新操作类型: ${operation.type}`)
+    }
+
+    if (operation.type === 'replace') {
+      validateReplaceOperation(operation)
+      continue
     }
 
     if (operation.type === 'set') {

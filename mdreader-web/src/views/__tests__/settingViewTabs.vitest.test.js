@@ -8,6 +8,8 @@ import SettingView from '../SettingView.vue'
 const mocked = vi.hoisted(() => ({
   messageWarn: vi.fn(),
   messageWarning: vi.fn(),
+  messageSuccess: vi.fn(),
+  messageError: vi.fn(),
   modalConfirm: vi.fn(),
   channelSend: vi.fn(),
   store: {
@@ -23,6 +25,8 @@ vi.mock('ant-design-vue', () => ({
   message: {
     warn: mocked.messageWarn,
     warning: mocked.messageWarning,
+    success: mocked.messageSuccess,
+    error: mocked.messageError,
   },
   Modal: {
     confirm: mocked.modalConfirm,
@@ -113,11 +117,11 @@ beforeEach(() => {
 })
 
 describe('settingView 左侧 tab 结构', () => {
-  it('应渲染 6 个 tab 与 6 个面板，默认停在常规', async () => {
+  it('应渲染 7 个 tab 与 7 个面板，默认停在常规', async () => {
     const wrapper = await mountSettingView()
 
-    expect(wrapper.findAll('.setting-tab')).toHaveLength(6)
-    expect(wrapper.findAll('.setting-panel')).toHaveLength(6)
+    expect(wrapper.findAll('.setting-tab')).toHaveLength(7)
+    expect(wrapper.findAll('.setting-panel')).toHaveLength(7)
     expect(getSetupBinding(wrapper, 'activeTabKey')).toBe('general')
     expect(getSetupBinding(wrapper, 'settingTabList').map(tab => tab.key)).toEqual([
       'general',
@@ -126,6 +130,7 @@ describe('settingView 左侧 tab 结构', () => {
       'shortcut',
       'fileAndImage',
       'exportAndWatermark',
+      'configBackup',
     ])
   })
 

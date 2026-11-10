@@ -27,6 +27,15 @@ function setByPath(target, path, value) {
 export function applyConfigMutationRequest(currentConfig, request) {
   validateConfigMutationRequest(request)
 
+  // 整包替换（配置备份导入）：不走逐字段白名单，但替换结果仍必须是完整合法配置。
+  const replaceOperation = request.operations.find(operation => operation.type === 'replace')
+
+  if (replaceOperation) {
+    const replacedConfig = cloneValue(replaceOperation.config)
+    validateConfigShape(replacedConfig)
+    return replacedConfig
+  }
+
   // mutation 必须产出新配置对象，避免原地修改当前内存配置。
   const nextConfig = cloneValue(currentConfig)
 

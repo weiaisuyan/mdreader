@@ -1,7 +1,7 @@
 {
   "name": "mdreader",
   "type": "module",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "markdown编辑器",
   "author": {
     "name": "魏杰",

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron'
 import configUtil from '../../data/configUtil.js'
 import recent from '../../data/recent.js'
+import configBackupUtil from '../configBackupUtil.js'
 import { getDocumentSessionRuntime } from '../document-session/documentSessionRuntime.js'
 import windowLifecycleService from '../document-session/windowLifecycleService.js'
 import fileUploadUtil from '../fileUploadUtil.js'
@@ -187,6 +188,7 @@ const handlerList = {
   ...settingUtil.channel,
   ...aboutUtil.channel,
   ...guideUtil.channel,
+  ...configBackupUtil.channel,
   'export-start': (windowContext, data) => {
     const exportRequest = typeof data === 'string'
       ? { type: data, target: 'file' }

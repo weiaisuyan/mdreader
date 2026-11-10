@@ -9,7 +9,7 @@ const { SETTING_SEARCH_ITEM_LIST, SETTING_SECTION_META } = settingSearchIndexMod
 
 const settingViewSource = readFileSync(new URL('../../../views/SettingView.vue', import.meta.url), 'utf8')
 
-const SETTING_TAB_KEY_LIST = ['general', 'appearance', 'editor', 'shortcut', 'fileAndImage', 'exportAndWatermark']
+const SETTING_TAB_KEY_LIST = ['general', 'appearance', 'editor', 'shortcut', 'fileAndImage', 'exportAndWatermark', 'configBackup']
 
 /**
  * 收集模板中被引用的静态 id，动态拼接（含 ${} 或 +）的调用会被过滤掉。
