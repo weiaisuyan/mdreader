@@ -24,17 +24,17 @@ import LayoutTop from '@/components/layout/LayoutTop.vue'
 import OutlinePanel from '@/components/layout/OutlinePanel.vue'
 import SidebarPanel from '@/components/layout/SidebarPanel.vue'
 import { useCommonStore } from '@/stores/counter.js'
+import channelUtil from '@/util/channel/channelUtil.js'
 import { sendConfigMutationRequest } from '@/util/config/configMutationCommandUtil.js'
 import { getConfigUpdateFailureMessageKey } from '@/util/config/configUpdateResultUtil.js'
 import { registerCurrentWindowOpenPreparation } from '@/util/document-session/currentWindowOpenPreparationService.js'
-import { requestOpenDroppedMarkdownDocument } from '@/util/document-session/documentDropOpenUtil.js'
+import { openDroppedMarkdownDocumentInPane } from '@/util/document-session/documentDropOpenInPaneUtil.js'
 import {
   createDocumentOpenInteractionService,
   registerDocumentOpenInteractionService,
 } from '@/util/document-session/documentOpenInteractionService.js'
-import { requestDocumentOpenDialog } from '@/util/document-session/rendererDocumentCommandUtil.js'
 import { resolveMinContentWidth } from '@/util/document-session/paneLayoutUtil.js'
-import channelUtil from '@/util/channel/channelUtil.js'
+import { requestDocumentOpenDialog } from '@/util/document-session/rendererDocumentCommandUtil.js'
 import { createFileManagerOpenDecisionController } from '@/util/file-manager/fileManagerOpenDecisionController.js'
 import { createFileManagerPanelWidthPersistenceController } from '@/util/file-manager/fileManagerPanelWidthPersistenceController.js'
 import shortcutKeyUtil from '@/util/shortcutKeyUtil.js'
@@ -136,8 +136,8 @@ const homeViewFileManagerHostStyle = computed(() => {
       sidebarWidth: fittedSidePanelWidths.value.sidebarWidth,
       outlineVisible: Boolean(store.outlineVisible),
       outlineWidth: fittedSidePanelWidths.value.outlineWidth,
-    editorWidth: editorLayoutWeight.value > 0 ? editorLayoutWeight.value : null,
-    containerWidth: hostContainerWidth.value > 0 ? hostContainerWidth.value : null,
+      editorWidth: editorLayoutWeight.value > 0 ? editorLayoutWeight.value : null,
+      containerWidth: hostContainerWidth.value > 0 ? hostContainerWidth.value : null,
     }),
   }
 })
@@ -234,7 +234,7 @@ function onWindowDragOver(event) {
   event.preventDefault()
 }
 
-function onWindowDrop(event) {
+async function onWindowDrop(event) {
   if (isFileDragEvent(event) !== true) {
     return
   }
@@ -245,7 +245,9 @@ function onWindowDrop(event) {
   }
   // 统一拦截文件拖拽，避免 Chromium 回退到 file:// 导航。
   event.preventDefault()
-  requestOpenDroppedMarkdownDocument(event.dataTransfer.files)
+  // 聚焦栏只剩一个空白标签时直接顶替它（用户开软件后拖文件进来的直觉行为）；
+  // 该标签已被编辑过（dirty）则照常开新标签，不会覆盖用户正在写的内容。
+  await openDroppedMarkdownDocumentInPane(event.dataTransfer.files, { store })
 }
 
 /**
@@ -269,7 +271,6 @@ watch(
   () => { syncMinContentWidth() },
   { immediate: true },
 )
-
 
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)

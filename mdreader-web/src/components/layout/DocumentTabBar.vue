@@ -21,13 +21,15 @@ import {
   closeTabById,
   closeTabsByIds,
 } from '@/util/document-session/rendererTabCommandService.js'
-import { copyTextWithFeedback } from '@/util/previewInlineCodeCopyUtil.js'
-import { useDocumentTabDrag } from '@/util/useDocumentTabDrag.js'
 import {
+  isPaneReusableBlank,
   openDroppedFileInGroup,
+  openDroppedFileReplacingBlank,
   resolveDroppedFilePath,
   resolveOpenFailureMessageKey,
 } from '@/util/file-manager/fileDragDropUtil.js'
+import { copyTextWithFeedback } from '@/util/previewInlineCodeCopyUtil.js'
+import { useDocumentTabDrag } from '@/util/useDocumentTabDrag.js'
 
 /**
  * 多栏并排时这一栏对应的标签组 id。
@@ -257,7 +259,12 @@ async function handleTabBarFileDrop(event) {
     || store.focusedGroupId
     || null
 
-  const result = await openDroppedFileInGroup(path, targetGroupId, store)
+  // 目标栏只剩一个空白标签时直接顶替它；已编辑过则照常开新标签。
+  const paneList = Array.isArray(store.paneGroupList) ? store.paneGroupList : []
+  const targetPane = paneList.find(pane => pane?.groupId === targetGroupId) || null
+  const result = isPaneReusableBlank(targetPane)
+    ? await openDroppedFileReplacingBlank(path, targetPane, store)
+    : await openDroppedFileInGroup(path, targetGroupId, store)
   const failureKey = resolveOpenFailureMessageKey(result?.reason)
   if (failureKey) {
     message.error(t(failureKey))
@@ -768,7 +775,7 @@ function onMenuClick({ key }, tab) {
     <div
       ref="scrollerRef"
       data-testid="document-tab-scroller"
-      class="document-tab-bar__scroller min-w-0 flex flex-1 items-center overflow-hidden pl-2 py-1"
+      class="document-tab-bar__scroller min-w-0 flex flex-1 items-center overflow-hidden py-1 pl-2"
     >
       <template v-for="(tab, index) in tabs" :key="tab.sessionId">
         <!-- 独立分隔元素：真实 DOM 节点，数量恒为「标签数 − 1」 -->
@@ -833,7 +840,7 @@ function onMenuClick({ key }, tab) {
         插槽被挤到栏的最右端 —— 表现就是「+ 永远贴右边，离最后一个标签很远」。
 
         放在内部靠两条 CSS 约束得到正确行为：
-        · 标签 `flex-1 basis-0` 会争抢可用宽度，但受 `max-w-60`（240px）上限约束 —— 
+        · 标签 `flex-1 basis-0` 会争抢可用宽度，但受 `max-w-60`（240px）上限约束 ——
           标签少时每个标签最多 240px，抢不满整行，按钮就紧跟其后；
         · 标签多时标签被压到 `min-w-6`（24px）下限，把按钮顶到最右，仍不需要滚动。
 

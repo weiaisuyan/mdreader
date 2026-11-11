@@ -6,12 +6,25 @@ mdreader 的版本速查表。每个版本的完整说明在 [`release-notes/<�
 
 | 版本 | 发布日期 | 类型 | 一句话 | 安装包 |
 | --- | --- | --- | --- | --- |
+| 1.0.4 | 2026-11-11 | 修复 | 窗口四角补 DWM 圆角、边框不再被系统边框盖住、侧栏/大纲栏展开状态记忆、侧栏最小宽度与校验对齐、大纲栏横向滚动条、窗口大小/位置记忆、拖入文件接管空白标签、CRLF 文件不再假脏弹保存提示 | `mdreader-win32-x64-1.0.4.exe` |
 | 1.0.3 | 2026-11-10 | 新增 | 设置页新增「配置备份」，可导出/导入应用设置 | `mdreader-win32-x64-1.0.3.exe` |
 | 1.0.2 | 2026-11-10 | 修复 | 首次安装不再恢复上次会话的标签页与最近文件；Linux 自动更新指向本仓库 | `mdreader-win32-x64-1.0.2.exe` |
 | 1.0.1 | 2026-11-09 | 修复 | 非最大化时四边边框完整且保留系统动画；拖文件浮层只显示文件名 | `mdreader-win32-x64-1.0.1.exe` |
 | 1.0.0 | 2026-11-09 | 首个版本 | 从 wj-markdown-editor 3.1.1 分叉，完成品牌独立与首批缺陷修复 | `mdreader-win32-x64-1.0.0.exe` |
 
 ## 各版本改了什么
+
+### 1.0.4 — 窗口圆角与状态记忆
+
+- 窗口四角补上 DWM 原生圆角（`DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND`），圆角外侧不再露出方形窗口底色
+- 侧栏、大纲栏的展开/收起状态改为切换即写盘（`sidebarDefaultView` / `outlineVisible`），下次启动按上次状态恢复
+- `sidebarWidth` 校验下限 220 → 160，与界面最小宽度一致，不再出现「拖窄侧栏 → 配置内容无效」
+- 大纲栏空态占位插画限制为不超容器宽度，去掉底部横向滚动条
+- 窗口大小/位置与「是否最大化」记在独立的 `data/window-state.json`（不进 `config.json`，避免动配置结构），启动时校验可见性后恢复
+- 拖入 md 文件时接管目标栏的空白标签（有未保存改动的标签不算空白，照旧新开）
+- CRLF 换行的文件打开后不再被判为「已修改」，关闭时不再误弹保存提示，保存仍写回 CRLF
+- `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` 关掉系统自己那条 1px 边框，拖动/切换焦点后青色边框不再被盖住
+- 相关实现：`mdreader-electron/src/util/windowStyleUtil.js`、`mdreader-electron/src/util/document-session/windowLifecycleService.js`、`mdreader-electron/src/util/document-session/lineEndingUtil.js`、`mdreader-electron/src/data/windowState.js`、`mdreader-electron/src/main.js`、`mdreader-web/src/util/layout/sidebarVisibilityPersistenceController.js`、`mdreader-web/src/util/document-session/documentDropOpenInPaneUtil.js`、`mdreader-web/src/util/file-manager/fileDragDropUtil.js`、`mdreader-web/src/stores/counter.js`、`mdreader-web/src/components/editor/MarkdownMenu.vue`、`mdreader-web/src/views/HomeView.vue`、`mdreader-web/src/components/layout/DocumentTabBar.vue`、`mdreader-web/src/components/editor/MarkdownEdit.vue`
 
 ### 1.0.3 — 配置备份
 

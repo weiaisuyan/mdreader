@@ -6,8 +6,8 @@ import fs from 'fs-extra'
 import configUtil from '../../data/configUtil.js'
 import recent from '../../data/recent.js'
 import tabGroup from '../../data/tabGroup.js'
+import windowStateStore from '../../data/windowState.js'
 import { WINDOW_ICON_PATH } from '../appIconUtil.js'
-import { ensureWindowCaptionStyle } from '../windowStyleUtil.js'
 import sendUtil from '../channel/sendUtil.js'
 import commonUtil from '../commonUtil.js'
 import fileWatchUtil from '../fileWatchUtil.js'
@@ -15,6 +15,7 @@ import resourceFileUtil from '../resourceFileUtil.js'
 import { resolveLanguagePreference } from '../systemLocaleUtil.js'
 import updateUtil from '../updateUtil.js'
 import { isDevServerMode } from '../webSourceUtil.js'
+import { applyNativeFrameAppearance, ensureWindowCaptionStyle } from '../windowStyleUtil.js'
 import {
   appendMarkdownExtension,
   isMarkdownFilePath,
@@ -3702,6 +3703,169 @@ async function waitForManualSaveRequestCompletion(windowId, requestId, {
   }
 }
 
+/**
+ * 窗口大小/位置的记忆（存在 `data/window-state.json`，见 data/windowState.js 里的取舍说明）。
+ *
+ * 只让本进程的**第一个窗口**套用上次的矩形：之后新建的窗口继续按系统默认层叠摆放，
+ * 否则每个新窗口都会精确叠在同一个位置上。
+ */
+const WINDOW_STATE_SAVE_DELAY_MS = 400
+let hasAppliedRestoredWindowBounds = false
+
+function measureOverlap(bounds, workArea) {
+  const overlapWidth = Math.min(bounds.x + bounds.width, workArea.x + workArea.width) - Math.max(bounds.x, workArea.x)
+  const overlapHeight = Math.min(bounds.y + bounds.height, workArea.y + workArea.height) - Math.max(bounds.y, workArea.y)
+  return { overlapWidth, overlapHeight }
+}
+
+/**
+ * 与 main.js 的 ensureWindowOnScreen 用同一套判据：至少 100×60 落在某块屏幕的工作区内。
+ * 判不过说明上次是在已经拔掉的显示器上用的，不能恢复。
+ */
+function isBoundsVisibleOnAnyDisplay(bounds, displayList) {
+  return displayList.some((display) => {
+    const { overlapWidth, overlapHeight } = measureOverlap(bounds, display.workArea)
+    return overlapWidth >= 100 && overlapHeight >= 60
+  })
+}
+
+/**
+ * 返回可用的恢复矩形；没有存档 / 存档不在任何屏幕内 / 非本进程首个窗口时返回 null。
+ */
+function resolveRestoredWindowBounds() {
+  if (hasAppliedRestoredWindowBounds) {
+    return null
+  }
+
+  const savedState = windowStateStore.get()
+  if (!savedState) {
+    return null
+  }
+
+  const displayList = typeof screen.getAllDisplays === 'function' ? screen.getAllDisplays() : []
+  if (displayList.length === 0 || !isBoundsVisibleOnAnyDisplay(savedState, displayList)) {
+    return null
+  }
+
+  // 尺寸可能比当前屏幕更大（换过更小的显示器）：先收缩到工作区内，再把位置拉回来。
+  const targetDisplay = displayList.find((display) => {
+    const { overlapWidth, overlapHeight } = measureOverlap(savedState, display.workArea)
+    return overlapWidth >= 100 && overlapHeight >= 60
+  }) || displayList[0]
+  const { workArea } = targetDisplay
+  const width = Math.min(savedState.width, workArea.width)
+  const height = Math.min(savedState.height, workArea.height)
+
+  return {
+    x: Math.min(Math.max(savedState.x, workArea.x), workArea.x + workArea.width - width),
+    y: Math.min(Math.max(savedState.y, workArea.y), workArea.y + workArea.height - height),
+    width,
+    height,
+    isMaximized: savedState.isMaximized === true,
+  }
+}
+
+function captureWindowStateSnapshot(win) {
+  if (!win || (typeof win.isDestroyed === 'function' && win.isDestroyed())) {
+    return null
+  }
+  // 全屏时不覆盖记忆：全屏矩形跟着显示器走，记下来没有意义。
+  if (typeof win.isFullScreen === 'function' && win.isFullScreen()) {
+    return null
+  }
+  // getNormalBounds：最大化状态下也能拿到「还原后」的矩形。
+  let targetBounds = null
+  if (typeof win.getNormalBounds === 'function') {
+    targetBounds = win.getNormalBounds()
+  }
+  else if (typeof win.getBounds === 'function') {
+    targetBounds = win.getBounds()
+  }
+  if (!targetBounds) {
+    return null
+  }
+  return {
+    x: targetBounds.x,
+    y: targetBounds.y,
+    width: targetBounds.width,
+    height: targetBounds.height,
+    isMaximized: typeof win.isMaximized === 'function' ? win.isMaximized() : false,
+  }
+}
+
+/**
+ * 挂上窗口大小/位置的自动记忆：拖动/缩放/最大化走防抖异步写，关窗时同步写。
+ */
+function attachWindowStatePersistence(win) {
+  let saveTimer = null
+  const scheduleSave = () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+    }
+    saveTimer = setTimeout(() => {
+      saveTimer = null
+      const snapshot = captureWindowStateSnapshot(win)
+      if (snapshot) {
+        windowStateStore.save(snapshot)
+      }
+    }, WINDOW_STATE_SAVE_DELAY_MS)
+  }
+
+  win.on('resize', scheduleSave)
+  win.on('move', scheduleSave)
+  win.on('maximize', scheduleSave)
+  win.on('unmaximize', scheduleSave)
+  // 最后一个窗口关闭后进程会立刻退出，异步写会被截断，这里必须同步落盘。
+  win.on('close', () => {
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    const snapshot = captureWindowStateSnapshot(win)
+    if (snapshot) {
+      windowStateStore.saveSync(snapshot)
+    }
+  })
+}
+
+/**
+ * 在窗口被拖动 / 缩放 / 最大化还原 / 切换焦点后重新应用原生外框属性。
+ *
+ * DWM 的圆角偏好与边框颜色本应跟 HWND 走，但实测在跨屏拖动、最大化还原、
+ * 激活状态切换之后观感会漂移（表现为「拖动后某几条边的青色边框没了」）。
+ * 这里统一在状态变化后节流重设一次，代价极低、状态幂等。
+ *
+ * @param {import('electron').BrowserWindow} win 目标窗口
+ */
+function attachNativeFrameRefresh(win) {
+  let refreshTimer = null
+  const scheduleRefresh = () => {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer)
+    }
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null
+      if (!win.isDestroyed?.()) {
+        applyNativeFrameAppearance(win)
+      }
+    }, 120)
+  }
+
+  win.on('move', scheduleRefresh)
+  win.on('resize', scheduleRefresh)
+  win.on('restore', scheduleRefresh)
+  win.on('maximize', scheduleRefresh)
+  win.on('unmaximize', scheduleRefresh)
+  win.on('focus', scheduleRefresh)
+  win.on('blur', scheduleRefresh)
+  win.on('close', () => {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer)
+      refreshTimer = null
+    }
+  })
+}
+
 async function createNew(filePath, isRecent = false, options = {}) {
   // 未显式初始化 runtime 时必须在这里直接失败，不能在内部自举。
   ensureSessionRuntimeInitialized()
@@ -3734,6 +3898,13 @@ async function createNew(filePath, isRecent = false, options = {}) {
 
   const id = commonUtil.createId()
   const workAreaSize = screen.getPrimaryDisplay().workAreaSize
+  const defaultWindowWidth = Math.round(workAreaSize.width / 4 * 3)
+  const defaultWindowHeight = Math.round(workAreaSize.height / 4 * 3)
+  // 首个窗口尝试套用上次的大小/位置；恢复不了就退回「主屏工作区 3/4」的默认尺寸。
+  const restoredWindowBounds = resolveRestoredWindowBounds()
+  if (restoredWindowBounds) {
+    hasAppliedRestoredWindowBounds = true
+  }
   const globalTheme = configUtil.getConfig()?.theme?.global === 'dark' ? 'dark' : 'light'
   const win = new BrowserWindow({
     /**
@@ -3779,8 +3950,18 @@ async function createNew(filePath, isRecent = false, options = {}) {
     backgroundColor: '#100e17',
     maximizable: true,
     resizable: true,
-    width: workAreaSize.width / 4 * 3,
-    height: workAreaSize.height / 4 * 3,
+    // 有记忆就还原上次的矩形，否则用默认尺寸（不给 x/y，交给系统层叠摆放）。
+    ...(restoredWindowBounds
+      ? {
+          x: restoredWindowBounds.x,
+          y: restoredWindowBounds.y,
+          width: restoredWindowBounds.width,
+          height: restoredWindowBounds.height,
+        }
+      : {
+          width: defaultWindowWidth,
+          height: defaultWindowHeight,
+        }),
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
@@ -3798,6 +3979,28 @@ async function createNew(filePath, isRecent = false, options = {}) {
    * 不会影响窗口本身。
    */
   ensureWindowCaptionStyle(win)
+
+  /**
+   * 让系统按 8px 裁圆角（Windows 11），同时去掉 DWM 自绘的那条 1px 边框。
+   *
+   * 窗口没有 `WS_THICKFRAME`，系统默认不给圆角，轮廓是直角；
+   * 渲染层只在内容区画了一圈 8px 圆角边框，四角外面就会露出方形窗口底色，
+   * 看起来像「圆角边框压在直角上」。这里补上 `DWMWA_WINDOW_CORNER_PREFERENCE`。
+   *
+   * 只设圆角还不够：DWM 会在窗口最外沿画一条 1px 边框，颜色随窗口激活状态变化，
+   * 正好压在渲染层青色边框那 1~2px 上 —— 拖动窗口 / 失焦后它变成浅灰把青边盖住，
+   * 用户反馈的「拖动后某些边的青色边框消失」就是这么来的。
+   * `DWMWA_BORDER_COLOR = DWMWA_COLOR_NONE` 关掉这条系统边框，观感就不会再漂移。
+   *
+   * 同样放在 show 之前，避免用户看到窗口形状跳变；失败只降级（角保持直角）。
+   */
+  applyNativeFrameAppearance(win)
+
+  // 窗口被拖动/缩放/最大化/切焦点后，重新应用一次外框属性，防止状态切换把观感弄丢。
+  attachNativeFrameRefresh(win)
+
+  // 记忆窗口大小/位置：内部会在 resize/move/maximize 上防抖保存，关窗时同步落盘。
+  attachWindowStatePersistence(win)
 
   let session = null
 
@@ -3840,6 +4043,10 @@ async function createNew(filePath, isRecent = false, options = {}) {
     }
 
     win.once('ready-to-show', () => {
+      // 上次关窗时是最大化：先最大化再显示，避免用户看到「先小窗再弹满」的一跳。
+      if (restoredWindowBounds?.isMaximized === true) {
+        win.maximize()
+      }
       win.show()
       setTimeout(() => {
         updateUtil.checkUpdate(listWindows())

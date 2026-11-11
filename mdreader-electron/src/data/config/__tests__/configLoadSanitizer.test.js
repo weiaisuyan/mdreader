@@ -149,13 +149,13 @@ describe('configLoadSanitizer', () => {
     expect(() => validateConfigShape(sanitized)).not.toThrow()
   })
 
-  it('sidebarWidth 小于最小值时必须裁剪到 220', () => {
+  it('sidebarWidth 小于最小值时必须裁剪到 160', () => {
     const sanitized = sanitizeLoadedConfig({
       ...cloneConfig(defaultConfig),
       sidebarWidth: 100,
     }, defaultConfig, configSchema)
 
-    expect(sanitized.sidebarWidth).toBe(220)
+    expect(sanitized.sidebarWidth).toBe(160)
   })
 
   it('sidebarWidth 大于最大值时必须裁剪到 420', () => {

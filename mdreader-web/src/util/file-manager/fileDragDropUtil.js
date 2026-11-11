@@ -322,10 +322,54 @@ export function isPaneReusableBlank(pane) {
 export async function openDroppedFileReplacingBlank(path, pane, store = null) {
   const blankSessionId = pane?.tabs?.[0]?.sessionId ?? null
   const result = await openDroppedFileInGroup(path, pane?.groupId, store)
-  if (result?.ok === true && blankSessionId) {
-    await requestDocumentCloseTab(blankSessionId).catch(() => {})
+
+  /**
+   * `request-invalidated` 必须和 `ok === true` 一样当作「打开了」。
+   *
+   * 打开文件会切换当前会话，HomeView 里监听 sessionId 的 watch 会
+   * `invalidateActiveRequest()`，于是 open 的返回值被判成失效 —— 但文件往往已经
+   * 真的开出来了（`openDroppedFileInGroup` 里对同一条 reason 也是这么处理的）。
+   * 这里若死守 `ok === true`，空标签就关不掉，表现正是「拖文件进来，空标签还留着」。
+   *
+   * 但只凭 reason 不够：请求被顶掉也可能是**没打开**。所以要再看一眼这一栏里
+   * 是否真的出现了这个路径的标签，确认后才关空标签（关掉用户正在写的内容是
+   * 不可恢复的破坏性操作，宁可多留一个空标签）。
+   */
+  const openTreatedAsSuccess = result?.ok === true || result?.reason === 'request-invalidated'
+  if (!blankSessionId || !openTreatedAsSuccess) {
+    return result
   }
+  if (store && !hasOpenTabForPath(store.paneGroupList, path)) {
+    return result
+  }
+  await requestDocumentCloseTab(blankSessionId).catch(() => {})
   return result
+}
+
+/**
+ * 判断当前窗口的标签里是否已经有这个路径。
+ *
+ * 渲染层拿到的 `displayPath` 是正斜杠形式（`C:/dir/a.md`），拖入路径是反斜杠，
+ * 且盘符大小写可能不同 —— 统一成正斜杠 + 小写再比。
+ *
+ * @param {Array<object> | null | undefined} paneList 栏快照列表
+ * @param {string} path 文件路径
+ * @returns {boolean} 是否已打开
+ */
+function hasOpenTabForPath(paneList, path) {
+  const wanted = String(path || '').replace(/\\/gu, '/').toLowerCase()
+  if (!wanted) {
+    return false
+  }
+  for (const pane of Array.isArray(paneList) ? paneList : []) {
+    for (const tab of Array.isArray(pane?.tabs) ? pane.tabs : []) {
+      const displayPath = String(tab?.displayPath || '').replace(/\\/gu, '/').toLowerCase()
+      if (displayPath && displayPath === wanted) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 export async function openDroppedFileInGroup(path, groupId, store = null) {

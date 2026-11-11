@@ -27,7 +27,8 @@ import { resolveMarkdownEditRenderItems } from '@/components/editor/markdownEdit
 import MarkdownPreview from '@/components/editor/MarkdownPreview.vue'
 import { createPreviewRefreshCoordinator } from '@/components/editor/previewRefreshCoordinator.js'
 import { useCommonStore } from '@/stores/counter.js'
-import { requestOpenDroppedMarkdownDocument } from '@/util/document-session/documentDropOpenUtil.js'
+import { openDroppedMarkdownDocumentInPane } from '@/util/document-session/documentDropOpenInPaneUtil.js'
+import { pickFirstMarkdownFile } from '@/util/document-session/documentDropOpenUtil.js'
 import { resolveDocumentScrollAnchorIdentity } from '@/util/document-session/documentScrollAnchorIdentityUtil.js'
 import { resolvePaneGroupSnapshot, usePaneId } from '@/util/document-session/paneContext.js'
 import { releaseDocumentEditSeq } from '@/util/document-session/rendererDocumentCommandUtil.js'
@@ -1072,7 +1073,9 @@ function createEditorViewOptions(sessionId, content) {
       }
       // 拖入 Markdown 文档时按“打开文档”处理，不能落入资源插入链路；
       // 返回 true 让 CodeMirror 阻止内建处理，同时通知 window 级监听无需重复接管。
-      if (requestOpenDroppedMarkdownDocument(dataTransfer.files)) {
+      // 目标栏只剩一个空白标签时直接顶替它（已编辑过则开新标签）。
+      if (pickFirstMarkdownFile(dataTransfer.files)) {
+        void openDroppedMarkdownDocumentInPane(dataTransfer.files, { store })
         return true
       }
       pasteOrDrop(event, view, dataTransfer.types, dataTransfer.files)

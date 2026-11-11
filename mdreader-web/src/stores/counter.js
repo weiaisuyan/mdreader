@@ -1,5 +1,7 @@
+import { message } from 'ant-design-vue'
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
+import i18n from '@/i18n/index.js'
 import channelUtil from '@/util/channel/channelUtil.js'
 import {
   createDefaultDocumentSessionSnapshot,
@@ -17,6 +19,7 @@ import {
   seedViewModesForTabList,
   setViewModeForSession,
 } from '@/util/document-session/viewModeBySessionUtil.js'
+import { createSidebarVisibilityPersistenceController } from '@/util/layout/sidebarVisibilityPersistenceController.js'
 
 // 与主进程 documentSessionStore 保持一致的默认标签组 id：
 // 单栏窗口的所有标签都挂在 main 上，多栏才会出现 group-2、group-3。
@@ -32,12 +35,46 @@ const useCommonStore = defineStore('common', () => {
   const isMaximize = ref(false)
   const isFullScreen = ref(false)
   const config = ref(configData)
-  // 侧边栏是否可见：由“默认视图”配置初始化，会话内切换不写盘
+  // 侧边栏是否可见：由“默认视图”配置初始化；用户切换后会写回配置（见 setSidebarVisible）
   const sidebarVisible = ref(configData.sidebarDefaultView !== 'close')
-  // 侧边栏当前 tab：会话内记住上次选择，不持久化
+  // 侧边栏当前 tab：由“默认视图”配置初始化；可见性变化时连同它一起落盘
   const sidebarActiveTab = ref(configData.sidebarDefaultView === 'outline' ? 'outline' : 'files')
-  // 右侧大纲栏是否可见：由配置初始化，会话内切换不写盘
+  // 右侧大纲栏是否可见：由配置初始化；用户切换后会写回配置（见 setOutlineVisible）
   const outlineVisible = ref(configData.outlineVisible !== false)
+
+  /**
+   * 侧栏可见性的落盘控制器（左侧文件栏 / 右侧大纲栏）。
+   *
+   * 历史问题：这两个开关原来只改内存 ref、从不写盘，
+   * 于是「展开侧边栏 → 关闭窗口 → 重新打开文件」之后又回到配置里的初始值
+   * （用户报的“侧边栏展开收起状态没有记忆”）。
+   *
+   * 这里复用配置 mutation 通道，把「上次状态」记进既有字段，
+   * 不新增配置项、不动 schema：
+   *   · 左侧文件栏是否可见 → sidebarDefaultView（'close' 表示不可见，'files' 表示可见）
+   *   · 右侧大纲栏是否可见 → outlineVisible
+   * 这样 sidebarDefaultView 就天然表示「启动时按上次状态恢复」。
+   */
+  const { t: translateGlobal } = i18n.global
+  const reportConfigWriteFailure = messageKey => message.warning(translateGlobal(messageKey))
+  const sidebarDefaultViewController = createSidebarVisibilityPersistenceController({
+    getPersistedValue: () => config.value?.sidebarDefaultView,
+    applyPersistedValue: (value) => {
+      config.value.sidebarDefaultView = value
+    },
+    configPath: ['sidebarDefaultView'],
+    normalizeValue: value => (value === 'outline' ? 'outline' : value === 'close' ? 'close' : 'files'),
+    showWarningMessage: reportConfigWriteFailure,
+  })
+  const outlineVisibleController = createSidebarVisibilityPersistenceController({
+    getPersistedValue: () => config.value?.outlineVisible !== false,
+    applyPersistedValue: (value) => {
+      config.value.outlineVisible = value
+    },
+    configPath: ['outlineVisible'],
+    normalizeValue: value => value === true,
+    showWarningMessage: reportConfigWriteFailure,
+  })
   // 每个标签页各自持有视图模式：source（仅源码）/ split（双栏）/ preview（仅预览）。
   // 未记录的会话一律回落到 startView，所以「新建标签」永远从配置的启动视图开始；
   // 不持久化，重启后所有标签都回到 startView。
@@ -219,15 +256,29 @@ const useCommonStore = defineStore('common', () => {
   }
 
   function setSidebarVisible(visible) {
-    sidebarVisible.value = Boolean(visible)
+    const nextVisible = Boolean(visible)
+    sidebarVisible.value = nextVisible
+
+    // 可见时记住当前 tab（大纲页签已独立到右侧，这里实际总是 files），
+    // 不可见时记 'close'。写盘失败只提示，不改内存状态。
+    const nextDefaultView = nextVisible
+      ? (sidebarActiveTab.value === 'outline' ? 'outline' : 'files')
+      : 'close'
+    void sidebarDefaultViewController.persistSidebarVisibility(nextDefaultView)
   }
 
   function setSidebarActiveTab(tab) {
     sidebarActiveTab.value = tab === 'outline' ? 'outline' : 'files'
+    // 侧栏可见时切换 tab：同样落盘，保持“上次状态”一致
+    if (sidebarVisible.value === true) {
+      void sidebarDefaultViewController.persistSidebarVisibility(sidebarActiveTab.value)
+    }
   }
 
   function setOutlineVisible(visible) {
-    outlineVisible.value = Boolean(visible)
+    const nextVisible = Boolean(visible)
+    outlineVisible.value = nextVisible
+    void outlineVisibleController.persistSidebarVisibility(nextVisible)
   }
 
   function setViewMode(mode) {

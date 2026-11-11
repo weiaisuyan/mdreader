@@ -477,8 +477,8 @@ onBeforeUnmount(() => {
         :action="close"
       />
     </div>
-    <div class="wj-scrollbar relative h-0 h-full flex-1 overflow-y-auto p-b-2 p-l-3 p-r-3 p-t-2">
-      <div v-if="flattenedAnchorList.length === 0" class="h-full flex items-center justify-center">
+    <div class="wj-scrollbar relative h-0 h-full flex-1 overflow-x-hidden overflow-y-auto p-b-2 p-l-3 p-r-3 p-t-2">
+      <div v-if="flattenedAnchorList.length === 0" class="markdown-menu__empty h-full min-w-0 w-full flex items-center justify-center">
         <a-empty>
           <template #description>
             <span class="color-gray-500">{{ $t('noOutline') }}</span>
@@ -602,5 +602,33 @@ onBeforeUnmount(() => {
     font-size: 0.75em;
     line-height: 0;
   }
+}
+
+/*
+ * 空大纲态：ant-design-vue 的 a-empty 插图（svg）是**固定 184px 宽**的，
+ * 而大纲栏最窄可以拖到 160px（outlineWidth 下限），
+ * 居中 flex 里 184px 的插图撑出 scrollWidth 172 > clientWidth 160，
+ * 于是大纲栏底部出现一条横向滚动条。
+ *
+ * 修法与 MarkdownEdit 预览区空状态一致：整块按可用宽度收缩，不让固定宽度撑破容器。
+ */
+.markdown-menu__empty :deep(.ant-empty) {
+  max-width: 100%;
+}
+
+.markdown-menu__empty :deep(.ant-empty-image) {
+  max-width: 100%;
+  height: auto;
+
+  svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+.markdown-menu__empty :deep(.ant-empty-description) {
+  max-width: 100%;
+  word-break: break-word;
 }
 </style>

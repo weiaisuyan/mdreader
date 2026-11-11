@@ -4,6 +4,7 @@ import { app, Menu, protocol, screen, shell } from 'electron'
 import configUtil from './data/configUtil.js'
 import recent from './data/recent.js'
 import tabGroup from './data/tabGroup.js'
+import windowState from './data/windowState.js'
 import { applyWindowsAppIdentity } from './util/appIdentityUtil.js'
 import { handleSecondInstanceOpenRequest, handleStartupOpenRequest, resolveOpenTargetFromArgs, resolveSecondInstanceOpenTarget } from './util/appOpenRequestUtil.js'
 import sendUtil from './util/channel/sendUtil.js'
@@ -255,6 +256,8 @@ if (!lock) {
       runtime.publishRecentListChanged(recentList)
     })
     await tabGroup.initTabGroup()
+    // 窗口大小/位置记忆：必须在建首个窗口之前读好，createNew 时才能套用。
+    await windowState.initWindowState()
 
     // 初始化协议处理器，捕获可能的错误
     try {

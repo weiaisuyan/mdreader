@@ -257,7 +257,10 @@ export const configSchema = {
       items: { enum: ['blur', 'close', 'switch', 'closeTab'] },
     },
     sidebarDefaultView: { enum: ['close', 'files', 'outline'] },
-    sidebarWidth: { type: 'number', minimum: 220, maximum: 420 },
+    // 下限必须与渲染层 `FILE_MANAGER_PANEL_MIN_WIDTH`（= MIN_PANE_WIDTH = 160）一致。
+    // 这里曾经是 220：用户把文件栏拖到 160..219 松手时，UI 认为合法、写盘却被 schema 拒绝，
+    // 弹出「配置内容无效，请检查当前修改。」且宽度不回弹。
+    sidebarWidth: { type: 'number', minimum: 160, maximum: 420 },
     outlineVisible: { type: 'boolean' },
     outlineWidth: { type: 'number', minimum: 160, maximum: 480 },
     // 并排编辑栏：栏数只作为「上次看到几栏」的记忆，真实栏数由标签组决定；

@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import path from 'node:path'
 import commonUtil from '../commonUtil.js'
 import { deriveDocumentSnapshot } from './documentSnapshotUtil.js'
+import { detectLineEnding } from './lineEndingUtil.js'
 
 // 基于正文内容生成稳定哈希。
 // 保存成功、外部变更收敛和磁盘基线比较都依赖这个哈希做版本判等。
@@ -1077,6 +1078,8 @@ export function createSaveCoordinator() {
       if (savedVersionStillCurrent) {
         session.diskSnapshot.content = payload.content
         session.diskSnapshot.versionHash = savedHash
+        // 保存写出的正文就是编辑器快照（已按磁盘风格展开），这里同步刷新换行风格。
+        session.diskSnapshot.lineEnding = detectLineEnding(payload.content)
         session.diskSnapshot.exists = true
         session.diskSnapshot.stat = payload.stat || null
         session.diskSnapshot.observedAt = savedAt

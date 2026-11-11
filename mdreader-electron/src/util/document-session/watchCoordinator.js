@@ -1,5 +1,6 @@
 import path from 'node:path'
 import fileWatchUtil from '../fileWatchUtil.js'
+import { detectLineEnding } from './lineEndingUtil.js'
 
 function serializeError(error) {
   if (!error) {
@@ -115,6 +116,9 @@ function updateDiskBaseline(session, {
 
   session.diskSnapshot.content = normalizedContent
   session.diskSnapshot.versionHash = versionHash
+  // 磁盘正文换了来源（外部修改、重新读盘）时，换行风格也要跟着刷新，
+  // 否则命令层仍按旧的 crlf/lf 归一，比较结果会失真。
+  session.diskSnapshot.lineEnding = detectLineEnding(normalizedContent)
   session.diskSnapshot.exists = Boolean(exists)
   session.diskSnapshot.stat = stat || null
   session.diskSnapshot.observedAt = observedAt

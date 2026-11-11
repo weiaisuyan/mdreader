@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import { normalizeDocumentSessionKind } from './documentSessionKind.js'
+import { detectLineEnding } from './lineEndingUtil.js'
 
 function createContentVersion(content = '') {
   return crypto.createHash('sha256').update(content, 'utf8').digest('hex')
@@ -125,6 +126,10 @@ function createBaseSession({
       // 这份磁盘基线来自哪条链路。
       // 例如 draft-init、bound-file、recent-missing 等，便于调试初始化来源。
       source: diskSource,
+      // 磁盘正文的换行风格（crlf / lf）。
+      // 编辑器内部统一用 \n，命令层收到正文时会按这个风格展开后再与磁盘基线比较，
+      // 避免 CRLF 文件一打开就被判成「有未保存修改」。
+      lineEnding: detectLineEnding(normalizedContent),
     },
     // 当前会话“最近一次确认写盘成功”的持久化快照。
     // 它和 diskSnapshot 分离，专门用于回答“本会话自己成功保存到了哪一版”。

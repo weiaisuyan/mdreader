@@ -1,5 +1,6 @@
 import { deriveDocumentSnapshot } from './documentSnapshotUtil.js'
 import { deriveWindowDocumentSnapshot } from './documentWindowSnapshotUtil.js'
+import { applyLineEnding } from './lineEndingUtil.js'
 import { createWatchCoordinator } from './watchCoordinator.js'
 
 // 为旧会话结构补齐 closeRuntime。
@@ -173,7 +174,13 @@ export function createDocumentCommandService({
     switch (command) {
       case 'document.edit':
       {
-        const nextContent = payload?.content ?? ''
+        // 编辑器/渲染层统一用 \n，磁盘基线可能是 \r\n。
+        // 这里按磁盘原有换行风格展开后再比较与写入，否则 CRLF 文件一打开就被判成脏，
+        // 用户什么都没改，关标签/关窗口却会弹出「存在未保存的修改」。
+        const nextContent = applyLineEnding(
+          payload?.content ?? '',
+          session.diskSnapshot?.lineEnding,
+        )
         // 乱序保护：同一会话的正文可能被多条并发命令推送
         // （关闭标签 / 批量关闭 / 关窗口都会集中 flush 全文），
         // 只接受序号更大的写入，否则旧正文会盖回新正文。
@@ -391,9 +398,9 @@ export function createDocumentCommandService({
           const existingGroupIds = store.getGroupIdsByWindowId?.(windowId) || []
           const reusableEmptyGroupId = insertAt === null
             ? existingGroupIds.find(groupId => (
-              groupId !== focusedGroupId
-              && (store.getSessionIdsByGroupId?.({ windowId, groupId }) || []).length === 0
-            ))
+                groupId !== focusedGroupId
+                && (store.getSessionIdsByGroupId?.({ windowId, groupId }) || []).length === 0
+              ))
             : null
           if (reusableEmptyGroupId) {
             store.activateGroup({ windowId, groupId: reusableEmptyGroupId })
