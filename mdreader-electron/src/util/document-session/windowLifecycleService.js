@@ -13,7 +13,6 @@ import commonUtil from '../commonUtil.js'
 import fileWatchUtil from '../fileWatchUtil.js'
 import resourceFileUtil from '../resourceFileUtil.js'
 import { resolveLanguagePreference } from '../systemLocaleUtil.js'
-import updateUtil from '../updateUtil.js'
 import { isDevServerMode } from '../webSourceUtil.js'
 import { applyNativeFrameAppearance, ensureWindowCaptionStyle } from '../windowStyleUtil.js'
 import {
@@ -4048,9 +4047,6 @@ async function createNew(filePath, isRecent = false, options = {}) {
         win.maximize()
       }
       win.show()
-      setTimeout(() => {
-        updateUtil.checkUpdate(listWindows())
-      }, 30000)
     })
     win.on('unmaximize', () => {
       publishWindowSizeChanged(win, false)

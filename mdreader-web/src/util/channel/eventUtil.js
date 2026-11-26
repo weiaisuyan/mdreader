@@ -72,9 +72,6 @@ export default {
     eventEmit.on('message', (data) => {
       showWindowEffectMessage(data)
     })
-    eventEmit.on('has-new-version', (flag) => {
-      store.hasNewVersion = flag
-    })
     eventEmit.on('window-size', (data) => {
       store.isMaximize = data.isMaximize
     })

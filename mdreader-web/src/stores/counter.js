@@ -83,7 +83,6 @@ const useCommonStore = defineStore('common', () => {
   const paneLayout = ref(normalizePaneLayout(configData.paneLayout))
   const searchBarVisible = ref(false)
   const editorSearchBarVisible = ref(false)
-  const hasNewVersion = ref(false)
   const isAlwaysOnTop = ref(false)
   const recentList = ref(normalizeRecentList(recentListData))
   const externalFileChange = ref(createDefaultExternalFileChangeState())
@@ -335,7 +334,6 @@ const useCommonStore = defineStore('common', () => {
     focusedGroupId,
     getPaneGroupSnapshot,
     searchBarVisible,
-    hasNewVersion,
     isAlwaysOnTop,
     recentList,
     editorSearchBarVisible,

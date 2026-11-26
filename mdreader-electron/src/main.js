@@ -16,7 +16,6 @@ import { createWindowRegistry } from './util/document-session/windowRegistry.js'
 import { migrateLegacyUserData } from './util/legacyUserDataMigrationUtil.js'
 import logUtil from './util/logUtil.js'
 import protocolUtil from './util/protocolUtil.js'
-import updateUtil from './util/updateUtil.js'
 import { resolveUserDataDir } from './util/userDataPathUtil.js'
 import aboutUtil from './util/win/aboutUtil.js'
 import exportUtil from './util/win/exportUtil.js'
@@ -346,6 +345,5 @@ if (!lock) {
       // 空草稿窗口（Untitled）
       await windowLifecycleService.createNew(null)
     }
-    await updateUtil.initUpdater(() => windowLifecycleService.listWindows())
   })
 }

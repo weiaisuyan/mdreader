@@ -1,3 +1,11 @@
+/**
+ * 应用内更新检查（1.0.6 起已停用）。
+ *
+ * mdreader 不再自动检查 / 下载 / 安装更新，启动流程、窗口生命周期和 IPC 都不再调用本模块。
+ * 右上角的新版本提示与关于页的检查 / 下载入口也已移除；需要新版本请从 GitHub Releases
+ * 手动下载覆盖安装。此文件保留实现仅用于历史参考，请勿重新接入。
+ */
+
 import { app } from 'electron'
 import semver from 'semver'
 import sendUtil from './channel/sendUtil.js'

@@ -9,7 +9,6 @@ import windowLifecycleService from '../document-session/windowLifecycleService.j
 import fileUploadUtil from '../fileUploadUtil.js'
 import imgUtil from '../imgUtil.js'
 import resourceFileUtil from '../resourceFileUtil.js'
-import updateUtil from '../updateUtil.js'
 import aboutUtil from '../win/aboutUtil.js'
 import exportUtil from '../win/exportUtil.js'
 import guideUtil from '../win/guideUtil.js'
@@ -29,11 +28,6 @@ const MIN_WINDOW_WIDTH = 800
 const MIN_WINDOW_HEIGHT = 600
 // 绝对下限：即使渲染层算出更小的值，窗口也不能比这更窄（否则顶栏按钮会挤爆）
 const ABSOLUTE_MIN_WINDOW_WIDTH = 420
-
-// 拖动窗口时的亚像素余量（按 windowId 存）。
-// 渲染层发的是 DIP 位移，setPosition 收物理像素，150% 缩放下每帧差 0.5px；
-// 余量攒着跨帧累加，否则长时间拖动会让窗口尺寸被系统反复矫正而胀大。
-const moveWindowRemainderMap = new Map()
 
 // 拖动窗口状态（按 windowId 存）：记录「鼠标相对窗口左上角的偏移」与「尺寸快照」。
 // 拖动全程由主进程用 screen.getCursorScreenPoint() 自己读鼠标，渲染层不传坐标 ——
@@ -568,18 +562,6 @@ const handlerList = {
   },
   'get-app-info': () => {
     return { name: 'mdreader', version: app.getVersion() }
-  },
-  'check-update': async () => {
-    return await updateUtil.checkUpdate(windowLifecycleService.listWindows())
-  },
-  'download-update': () => {
-    updateUtil.downloadUpdate(aboutUtil.get())
-  },
-  'cancel-download-update': () => {
-    updateUtil.cancelDownloadUpdate()
-  },
-  'execute-update': () => {
-    updateUtil.executeUpdate()
   },
   'recent.clear': async windowContext => await executeRuntimeUiCommand(windowContext, 'recent.clear', null),
   'recent.remove': async (windowContext, data) => await executeRuntimeUiCommand(windowContext, 'recent.remove', data),

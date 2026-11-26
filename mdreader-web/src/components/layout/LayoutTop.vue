@@ -42,6 +42,10 @@ const sidebarToggleLabel = computed(() => t(sidebarVisible.value
   ? 'topMenu.view.children.closeSidebar'
   : 'topMenu.view.children.openSidebar'))
 
+// 标题栏不再显示文件名：标签栏里的活动标签已经承担了“当前是哪个文档”，
+// 标题栏居中区只保留为窗口拖拽热区。
+const isMaximize = computed(() => store.isMaximize)
+
 function toggleSidebar() {
   if (typeof store.setSidebarVisible === 'function') {
     store.setSidebarVisible(!sidebarVisible.value)
@@ -78,7 +82,6 @@ function maximize() {
 function restore() {
   channelUtil.send({ event: 'restore' })
 }
-
 
 /**
  * 双击顶栏空白 = 最大化 / 还原。
@@ -127,15 +130,6 @@ const openFolder = createLayoutTopOpenFolderAction({
     message.warning(t('message.theCurrentFileIsNotSaved'))
   },
 })
-
-function openAbout() {
-  channelUtil.send({ event: 'open-about' })
-}
-
-// 标题栏不再显示文件名：标签栏里的活动标签已经承担了“当前是哪个文档”，
-// 标题栏居中区只保留为窗口拖拽热区。
-const isMaximize = computed(() => store.isMaximize)
-const hasNewVersion = computed(() => store.hasNewVersion)
 </script>
 
 <template>
@@ -186,22 +180,6 @@ const hasNewVersion = computed(() => store.hasNewVersion)
       </slot>
     </div>
     <div class="flex items-center">
-      <a-tooltip v-if="hasNewVersion" placement="bottom" color="#1677ff">
-        <template #title>
-          <span>{{ $t('top.newVersion') }}</span>
-        </template>
-        <TopBarActionButton
-          icon="i-tabler:arrow-bar-up"
-          class="bouncing color-red"
-          @click="openAbout"
-        />
-      </a-tooltip>
-      <div
-        v-if="hasNewVersion"
-        data-testid="layout-top-view-group-divider"
-        class="h-4 w-px shrink-0"
-        style="background-color: var(--wj-markdown-border-primary)"
-      />
       <!--
         这里刻意不用 a-tooltip 包裹：点击展开下拉时 tooltip 会浮在菜单正上方，
         把第一项「源码模式」盖住（实测遮挡）。改用原生 title 提示，

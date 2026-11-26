@@ -6,6 +6,7 @@ mdreader 的版本速查表。每个版本的完整说明在 [`release-notes/<�
 
 | 版本 | 发布日期 | 类型 | 一句话 | 安装包 |
 | --- | --- | --- | --- | --- |
+| 1.0.6 | 2026-11-26 | 变更 | 移除应用内更新检查：右上角新版本提示、关于页检查/下载/安装入口、启动与定时检查全部停用，以后从 Releases 手动下载覆盖安装 | `mdreader-win32-x64-1.0.6.exe` |
 | 1.0.5 | 2026-11-26 | 修复 | 纯预览最大化/还原后保持阅读位置；滚动条命中区加宽、分隔手柄向右侧让位，拖滚动条不再误调大纲栏宽度 | `mdreader-win32-x64-1.0.5.exe` |
 | 1.0.4 | 2026-11-11 | 修复 | 窗口四角补 DWM 圆角、边框不再被系统边框盖住、侧栏/大纲栏展开状态记忆、侧栏最小宽度与校验对齐、大纲栏横向滚动条、窗口大小/位置记忆、拖入文件接管空白标签、CRLF 文件不再假脏弹保存提示 | `mdreader-win32-x64-1.0.4.exe` |
 | 1.0.3 | 2026-11-10 | 新增 | 设置页新增「配置备份」，可导出/导入应用设置 | `mdreader-win32-x64-1.0.3.exe` |
@@ -14,6 +15,15 @@ mdreader 的版本速查表。每个版本的完整说明在 [`release-notes/<�
 | 1.0.0 | 2026-11-09 | 首个版本 | 从 wj-markdown-editor 3.1.1 分叉，完成品牌独立与首批缺陷修复 | `mdreader-win32-x64-1.0.0.exe` |
 
 ## 各版本改了什么
+
+### 1.0.6 — 停用应用内更新
+
+- 顶栏右侧「有新版本」的红色箭头、悬停提示与分隔线移除
+- 关于页的「检查更新 / 下载 / 取消下载 / 安装」按钮和下载进度条移除
+- 启动后每 10 分钟的定时检查、每个窗口打开 30 秒后的检查全部删除
+- 主进程的 `check-update` / `download-update` / `cancel-download-update` / `execute-update` IPC 删除
+- 以后需要新版本时从 GitHub Releases 手动下载 `.exe` 覆盖安装；用户数据与配置结构不变
+- 相关实现：`mdreader-web/src/components/layout/LayoutTop.vue`、`mdreader-web/src/views/AboutView.vue`、`mdreader-web/src/util/channel/eventUtil.js`、`mdreader-web/src/stores/counter.js`、`mdreader-electron/src/main.js`、`mdreader-electron/src/util/document-session/windowLifecycleService.js`、`mdreader-electron/src/util/channel/ipcMainUtil.js`、`mdreader-electron/src/util/updateUtil.js`（保留实现但不再接入）
 
 ### 1.0.5 — 阅读位置与滚动条命中区
 
