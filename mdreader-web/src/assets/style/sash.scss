@@ -6,7 +6,10 @@
 // - Hover highlights with a short delay; active/dragging highlights immediately
 
 $sash-size: 1px; // visible track width in the grid
-$sash-hit-zone: 6px; // extra hit-zone on each side of the track（4px 太窄，真实鼠标常抓空）
+$sash-hit-zone: 6px; // extra hit-zone on the right side of the track（4px 太窄，真实鼠标常抓空）
+// 纵向手柄左侧只留 2px：左侧栏位的右边缘通常就是滚动条（预览区 8~10px），
+// 对称扩 6px 会把滚动条几乎全部盖住，用户想拖滚动条却总是拖成侧栏宽度。
+$sash-hit-zone-left: 2px;
 
 .wj-sash {
   position: relative;
@@ -49,17 +52,18 @@ $sash-hit-zone: 6px; // extra hit-zone on each side of the track（4px 太窄，
   cursor: col-resize;
   width: $sash-size;
   height: 100%;
-  // Expand the clickable area without affecting layout
-  margin-left: -$sash-hit-zone;
+  // Expand the clickable area without affecting layout.
+  // 右侧保持 6px 的抓取区，左侧只伸进 2px，给滚动条让出命中区。
+  margin-left: -$sash-hit-zone-left;
   margin-right: -$sash-hit-zone;
-  padding-left: $sash-hit-zone;
+  padding-left: $sash-hit-zone-left;
   padding-right: $sash-hit-zone;
 
   // The 1px visible border line
   &::before {
     top: 0;
     bottom: 0;
-    left: $sash-hit-zone;
+    left: $sash-hit-zone-left;
     width: $sash-size;
   }
 
@@ -67,7 +71,7 @@ $sash-hit-zone: 6px; // extra hit-zone on each side of the track（4px 太窄，
   &::after {
     top: 0;
     bottom: 0;
-    left: $sash-hit-zone - 1;
+    left: $sash-hit-zone-left - 1;
     width: $sash-size + 2;
     border-radius: 1px;
   }

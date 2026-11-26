@@ -362,6 +362,13 @@ export function usePreviewSync({
       editorScrollTop.value = view.scrollDOM.scrollTop
       return
     }
+    // 纯预览态编辑器不可见：窗口缩放、CodeMirror 重排也会让隐藏的编辑器发出 scroll，
+    // 这类滚动再反推预览，会把正在阅读的位置冲回编辑区顶部。
+    // 只有显式 refresh（模式切换 / 预览刷新后的交接）才允许编辑区驱动预览。
+    if (isEditorVisibleRef?.value === false && refresh !== true) {
+      editorScrollTop.value = view.scrollDOM.scrollTop
+      return
+    }
     if (shouldSkipEditorToPreviewSync() === true) {
       editorScrollTop.value = view.scrollDOM.scrollTop
       return

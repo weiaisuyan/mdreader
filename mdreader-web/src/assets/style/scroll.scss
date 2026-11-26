@@ -18,9 +18,11 @@
   .cm-editor .cm-scroller *,
   .cm-tooltip-autocomplete > ul
 ) {
-  --wj-scrollbar-hit-size: 8px;
-  --wj-scrollbar-thumb-border-idle: 2px;
-  --wj-scrollbar-thumb-border-active: 1px;
+  // 命中区比视觉宽度大：视觉细条保持 4px（idle）/ 6px（hover、active）不变，
+  // 但整条滚动条的点击宽度从 8px 提到 10px，贴着侧栏分隔线也更容易抓中。
+  --wj-scrollbar-hit-size: 10px;
+  --wj-scrollbar-thumb-border-idle: 3px;
+  --wj-scrollbar-thumb-border-active: 2px;
   --wj-scrollbar-thumb-radius: 999px;
 
   &::-webkit-scrollbar {

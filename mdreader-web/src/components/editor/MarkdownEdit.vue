@@ -43,6 +43,7 @@ import {
 } from '@/util/editor/contentUpdateMetaUtil.js'
 import { createFlushableDebounce } from '@/util/editor/flushableDebounceUtil.js'
 import keymapUtil from '@/util/editor/keymap/keymapUtil.js'
+import { findPreviewElementAtScrollTop as findPreviewElementAtScrollTopFromIndex } from '@/util/editor/previewLayoutIndexUtil.js'
 import {
   captureEditorLineAnchor,
   capturePreviewLineAnchor,
@@ -189,6 +190,14 @@ let lastKnownDocumentTabList = []
 const BOTTOM_GAP = '40vh'
 const EDITOR_EMIT_DEBOUNCE_MS = 160
 let viewRestoreRequestToken = 0
+
+// 纯预览态窗口宽度变化时的阅读位置锚点。
+// 预览正文会随宽度重新换行，若继续沿用旧的像素 scrollTop，
+// 同一个滚动值就会落到另一段正文上（最大化 / 还原后“阅读位置变了”）。
+// 这里在滚动时记录视口顶部的正文锚点，宽度变化后按新布局把它放回顶部。
+let previewResizeAnchor = null
+let previewResizeObserver = null
+let lastObservedPreviewWidth = -1
 
 function getPreviewSearchTargetElements() {
   return collectSearchTargetElements(editorContainer.value)
@@ -625,6 +634,7 @@ const {
 } = useAssetInsert({ editorViewRef: editorView })
 
 const {
+  previewLayoutIndex,
   rebuildPreviewLayoutIndex,
   previewSync: {
     jumpToTargetLine,
@@ -668,6 +678,185 @@ const {
   },
 })
 
+/**
+ * 记录纯预览态当前视口顶部的正文锚点。
+ * 只做轻量采集：布局索引二分定位顶部块，再读取块内偏移比例。
+ * 双栏态由编辑区滚动联动兜底，这里不参与。
+ */
+function capturePreviewResizeAnchor() {
+  if (viewMode.value !== 'preview' || previewController.value !== true) {
+    previewResizeAnchor = null
+    return
+  }
+
+  const container = previewRef.value
+  if (!container) {
+    previewResizeAnchor = null
+    return
+  }
+
+  const scrollTop = container.scrollTop
+  const result = findPreviewElementAtScrollTopFromIndex({
+    previewLayoutIndex,
+    rootElement: container,
+    scrollTop,
+  })
+  const element = result.entry?.element ?? null
+  const anchor = element
+    ? capturePreviewLineAnchor({
+        container,
+        element,
+        scrollTop,
+      })
+    : null
+
+  previewResizeAnchor = anchor
+    ? {
+        anchor,
+        containerWidth: container.clientWidth,
+        documentKey: currentScrollSnapshot.value.documentKey,
+        sessionId: currentScrollSnapshot.value.sessionId,
+      }
+    : null
+}
+
+/**
+ * 纯预览态宽度变化后，把记录里的顶部正文重新对齐到视口顶部。
+ * 文档身份变化时直接丢弃记录，避免把旧行号套到新正文上。
+ *
+ * @returns {boolean} 是否真的写入了新的滚动位置。
+ */
+function restorePreviewResizeAnchor() {
+  if (
+    viewMode.value !== 'preview'
+    || previewController.value !== true
+    || restoreState.value.active === true
+  ) {
+    return false
+  }
+
+  const container = previewRef.value
+  const record = previewResizeAnchor
+  if (!container || container.isConnected === false || !record) {
+    return false
+  }
+
+  if (
+    record.documentKey !== currentScrollSnapshot.value.documentKey
+    || record.sessionId !== currentScrollSnapshot.value.sessionId
+  ) {
+    previewResizeAnchor = null
+    return false
+  }
+
+  const element = findPreviewElementByAnchor(container, record.anchor)
+  if (!element) {
+    return false
+  }
+
+  const targetScrollTop = resolvePreviewLineAnchorScrollTop({
+    container,
+    element,
+    anchor: record.anchor,
+    fallbackScrollTop: container.scrollTop,
+  })
+
+  if (Number.isFinite(targetScrollTop) !== true || Math.abs(container.scrollTop - targetScrollTop) < 1) {
+    return false
+  }
+
+  setScrollElementScrollTop(container, targetScrollTop)
+  return true
+}
+
+/**
+ * 观察预览容器的宽度变化。
+ * 只在宽度真正变化时恢复；高度变化不影响正文换行，无需处理。
+ *
+ * @param {HTMLElement | null} element
+ */
+function bindPreviewResizeObserver(element) {
+  previewResizeObserver?.disconnect()
+  previewResizeObserver = null
+  lastObservedPreviewWidth = -1
+
+  if (!element || typeof ResizeObserver !== 'function') {
+    return
+  }
+
+  lastObservedPreviewWidth = element.clientWidth
+  if (previewResizeAnchor && previewResizeAnchor.containerWidth !== lastObservedPreviewWidth) {
+    // 预览元素可能因为布局变化被重新挂载：此时宽度变化早于观察器绑定，
+    // 需要在绑定后补一次恢复，否则这次宽度变化会被漏掉。
+    nextTick(() => restorePreviewResizeAnchor())
+  }
+  previewResizeObserver = new ResizeObserver(() => {
+    if (previewRef.value !== element) {
+      return
+    }
+
+    const width = element.clientWidth
+    if (width === lastObservedPreviewWidth) {
+      return
+    }
+    lastObservedPreviewWidth = width
+
+    if (width <= 0) {
+      return
+    }
+
+    restorePreviewResizeAnchor()
+  })
+  previewResizeObserver.observe(element)
+}
+
+/**
+ * 预览区滚动入口。
+ * 纯预览态没有编辑器的反向联动，必须在滚动时同步记录顶部锚点；
+ * 双栏态继续沿用原有联动逻辑，不额外采样。
+ */
+function handlePreviewScroll() {
+  if (viewMode.value === 'preview') {
+    capturePreviewResizeAnchor()
+  }
+  syncPreviewToEditor()
+}
+
+watch(previewRef, (element) => {
+  bindPreviewResizeObserver(element ?? null)
+  if (element) {
+    nextTick(() => capturePreviewResizeAnchor())
+  }
+}, { flush: 'post' })
+
+// 只有文档身份真的变化才丢弃锚点；同一文档的快照刷新（revision、对象引用变化）
+// 不能清掉它，否则窗口最大化时宿主的快照回灌会让锚点先失效、恢复落空。
+watch(
+  () => [currentScrollSnapshot.value.documentKey, currentScrollSnapshot.value.sessionId],
+  () => {
+    previewResizeAnchor = null
+  },
+)
+
+/**
+ * 切到纯预览时，布局与首轮同步滚动都在下一帧完成，
+ * 因此延后一帧再采样，避免记录到过渡布局中的位置。
+ */
+watch(viewMode, (mode) => {
+  previewResizeAnchor = null
+  if (mode !== 'preview') {
+    return
+  }
+
+  nextTick(() => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => capturePreviewResizeAnchor())
+      return
+    }
+    setTimeout(() => capturePreviewResizeAnchor(), 16)
+  })
+})
+
 const { onRefreshComplete } = createPreviewRefreshCoordinator({
   rebuildPreviewLayoutIndex,
   syncPreviewAfterRefresh: () => {
@@ -681,6 +870,19 @@ const { onRefreshComplete } = createPreviewRefreshCoordinator({
   restorePreviewLinkedHighlight,
   closePreviewSearchBar,
 })
+
+/**
+ * 预览刷新完成后补采样一次。
+ * 正文结构可能因渲染完成而变化（图片撑开、mermaid 落位），
+ * 此时若滚动值没变就不会有 scroll 事件，必须主动更新锚点，
+ * 否则下一次窗口宽度变化会按旧行号恢复。
+ */
+function handlePreviewRefreshComplete() {
+  onRefreshComplete()
+  if (viewMode.value === 'preview') {
+    capturePreviewResizeAnchor()
+  }
+}
 
 const {
   buildToolbarList,
@@ -1851,6 +2053,9 @@ onBeforeUnmount(() => {
   unbindEvents()
   cancelScheduledOutlineActiveLineSync()
   clearScrollTimer()
+  previewResizeObserver?.disconnect()
+  previewResizeObserver = null
+  previewResizeAnchor = null
   destroySplitLayout()
   destroyEditor()
   pendingExternalSync.value = null
@@ -1905,7 +2110,7 @@ defineExpose({
           data-layout-item="preview"
           class="allow-search wj-scrollbar markdown-edit-layout__preview relative h-full overflow-y-auto p-2"
           :style="previewContainerStyle"
-          @scroll="syncPreviewToEditor"
+          @scroll="handlePreviewScroll"
           @click="onPreviewAreaClick"
         >
           <div class="markdown-edit-layout__preview-center" :style="previewCenterStyle">
@@ -1929,7 +2134,7 @@ defineExpose({
               :preview-scroll-container="() => previewRef"
               :watermark="watermark"
               :defer-watermark-until-ready="true"
-              @refresh-complete="onRefreshComplete"
+              @refresh-complete="handlePreviewRefreshComplete"
               @preview-contextmenu="onPreviewContextmenu"
               @asset-open="onAssetOpen"
             />

@@ -776,6 +776,79 @@ test('恢复期激活时，编辑区同步到预览区不应触发预览滚动',
   assert.equal(previewElement.scrollToCalls.length, 0)
 })
 
+test('纯预览态编辑器不可见时，隐藏编辑器的滚动不得反推预览区', () => {
+  previewElement.scrollTop = 0
+  previewElement.scrollToCalls = []
+
+  const lineHeights = new Map([
+    [1, 30],
+    [2, 30],
+    [3, 30],
+    [4, 30],
+    [5, 30],
+  ])
+  const editorView = createEditorView(lineHeights)
+  editorView.scrollDOM.scrollTop = 45
+  const elements = [
+    createElement({ tagName: 'p', lineStart: 1, lineEnd: 1, offsetTop: 0, actualTop: 0, height: 30 }),
+    createElement({ tagName: 'p', lineStart: 2, lineEnd: 2, offsetTop: 60, actualTop: 60, height: 30 }),
+  ]
+  setPreviewElements(elements)
+  const editorScrollTop = { value: 0 }
+
+  const { syncEditorToPreview } = usePreviewSync({
+    editorViewRef: { value: editorView },
+    previewRef: { value: previewElement },
+    scrolling: { value: { editor: false, preview: false } },
+    editorScrollTop,
+    // 纯预览态编辑器不可见：窗口缩放、CodeMirror 重排引发的 scroll 不允许撼动阅读位置。
+    isEditorVisibleRef: { value: false },
+  })
+
+  syncEditorToPreview()
+
+  assert.equal(previewElement.scrollToCalls.length, 0)
+  assert.equal(previewElement.scrollTop, 0)
+  // 缓存仍要跟随，否则恢复结束后的首次同步会因缓存滞后被误判成新滚动。
+  assert.equal(editorScrollTop.value, 45)
+})
+
+test('纯预览态显式 refresh 时，编辑区仍应把位置交接给预览区', () => {
+  previewElement.scrollTop = 0
+  previewElement.scrollToCalls = []
+
+  const lineHeights = new Map([
+    [1, 30],
+    [2, 30],
+    [3, 30],
+    [4, 30],
+    [5, 30],
+  ])
+  const editorView = createEditorView(lineHeights)
+  editorView.scrollDOM.scrollTop = 45
+  const elements = [
+    createElement({ tagName: 'p', lineStart: 1, lineEnd: 1, offsetTop: 0, actualTop: 0, height: 30 }),
+    createElement({ tagName: 'p', lineStart: 2, lineEnd: 2, offsetTop: 60, actualTop: 60, height: 30 }),
+  ]
+  setPreviewElements(elements)
+  const editorScrollTop = { value: 0 }
+
+  const { syncEditorToPreview } = usePreviewSync({
+    editorViewRef: { value: editorView },
+    previewRef: { value: previewElement },
+    scrolling: { value: { editor: false, preview: false } },
+    editorScrollTop,
+    isEditorVisibleRef: { value: false },
+  })
+
+  // 模式切换 / 预览刷新后的显式交接必须放行，否则切入纯预览时无法沿用编辑区位置。
+  syncEditorToPreview(true)
+
+  assert.deepEqual(previewElement.scrollToCalls, [75])
+  assert.equal(previewElement.scrollTop, 75)
+  assert.equal(editorScrollTop.value, 45)
+})
+
 test('恢复期结束后的首次编辑区同步，不应因滚动缓存滞后误触发预览滚动', () => {
   previewElement.scrollTop = 0
   previewElement.scrollToCalls = []
